@@ -1,6 +1,6 @@
-# Module Design Guide
+# Module Design Guide with Enhanced Error Handling
 
-This guide provides a comprehensive overview of the AI Proxy module structure and implementation details.
+This guide provides a comprehensive overview of the AI Proxy module structure and implementation details, with enhanced error handling using `anyhow` + `thiserror`.
 
 ## Project Structure
 
@@ -8,7 +8,7 @@ This guide provides a comprehensive overview of the AI Proxy module structure an
 src/
 ├── main.rs           # Application entry point
 ├── config.rs         # Configuration management
-├── errors.rs         # Error handling
+├── errors.rs         # Error handling with anyhow + thiserror
 ├── server.rs         # Web server and routing
 └── providers/        # AI provider implementations
     ├── mod.rs        # Provider trait and exports
@@ -122,13 +122,14 @@ pub fn load_config() -> Result<Config, figment::Error> {
 }
 ```
 
-### 3. `errors.rs` - Unified Error Handling
+### 3. `errors.rs` - Error Handling with anyhow + thiserror
 
 **Responsibilities:**
 
-- Define global `AppError` enum for all error types
+- Provide well-typed errors for API responses using `thiserror`
+- Support context-rich error handling with `anyhow`
 - Implement `IntoResponse` for HTTP error responses
-- Provide error conversion traits
+- Enable ergonomic error propagation throughout the codebase
 
 **Implementation:**
 
@@ -140,59 +141,141 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use thiserror::Error;
 use serde_json::json;
 
-#[derive(Debug)]
+/// Application-specific errors that need special handling
+#[derive(Error, Debug)]
 pub enum AppError {
-    // Client errors
+    #[error("Bad request: {0}")]
     BadRequest(String),
-    // Proxy internal errors
-    InternalServerError(String),
+    
+    #[error("Provider not found: {0}")]
     ProviderNotFound(String),
-    // Backend API errors
+    
+    #[error("Provider error: {message}")]
     ProviderError {
         status: u16,
         message: String,
     },
-    // Dependency errors
-    ReqwestError(reqwest::Error),
-    JsonError(serde_json::Error),
+    
+    #[error("Internal server error: {0}")]
+    InternalServerError(String),
+    
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+    
+    #[error("Request validation failed: {0}")]
+    ValidationError(String),
 }
 
-// Convert AppError to HTTP response
+impl AppError {
+    pub fn bad_request(msg: impl Into<String>) -> Self {
+        Self::BadRequest(msg.into())
+    }
+
+    pub fn provider_not_found(msg: impl Into<String>) -> Self {
+        Self::ProviderNotFound(msg.into())
+    }
+
+    pub fn provider_error(status: u16, message: impl Into<String>) -> Self {
+        Self::ProviderError {
+            status,
+            message: message.into(),
+        }
+    }
+
+    pub fn internal(msg: impl Into<String>) -> Self {
+        Self::InternalServerError(msg.into())
+    }
+}
+
+/// Convert AppError to HTTP response
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, error_message) = match self {
-            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+        let (status, error_message) = match &self {
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            AppError::ProviderNotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             AppError::ProviderError { status, message } => {
-                (StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), message)
+                (StatusCode::from_u16(*status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR), message.clone())
             }
-            AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            AppError::ProviderNotFound(msg) => (StatusCode::NOT_FOUND, msg),
-            // Convert external errors to internal server errors
-            AppError::ReqwestError(e) => {
-                tracing::error!("Reqwest error: {:?}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal network error".to_string())
-            }
-            AppError::JsonError(e) => {
-                tracing::error!("JSON error: {:?}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Serialization error".to_string())
-            }
+            AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            AppError::ConfigError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
         };
 
-        let body = Json(json!({ "error": { "message": error_message } }));
+        let error_type = match &self {
+            AppError::BadRequest(_) => "invalid_request_error",
+            AppError::ProviderNotFound(_) => "not_found",
+            AppError::ProviderError { .. } => "provider_error",
+            AppError::InternalServerError(_) => "internal_error",
+            AppError::ConfigError(_) => "config_error",
+            AppError::ValidationError(_) => "validation_error",
+        };
+
+        let body = Json(json!({
+            "error": {
+                "message": error_message,
+                "type": error_type,
+            }
+        }));
+        
         (status, body).into_response()
     }
 }
 
-// From traits for ? operator
-impl From<reqwest::Error> for AppError {
-    fn from(err: reqwest::Error) -> Self { AppError::ReqwestError(err) }
+/// Convert from anyhow::Error to AppError for error context
+impl From<anyhow::Error> for AppError {
+    fn from(err: anyhow::Error) -> Self {
+        tracing::error!("Application error: {:?}", err);
+        AppError::InternalServerError(err.to_string())
+    }
 }
 
-impl From<serde_json::Error> for AppError {
-    fn from(err: serde_json::Error) -> Self { AppError::JsonError(err) }
+/// Helper type for results that use anyhow for error handling
+pub type AppResult<T> = Result<T, AppError>;
+
+/// Helper type for results that use anyhow for internal operations
+pub type AnyhowResult<T> = anyhow::Result<T>;
+```
+
+### Error Handling Strategy with anyhow + thiserror
+
+**When to use which:**
+
+- **`anyhow::Result<T>`**: Use for internal operations where error context is more important than specific error types
+- **`AppError`**: Use for errors that need to be returned to API clients with specific HTTP status codes
+- **`AppResult<T>`**: Use as return type for handler functions that need to return HTTP responses
+
+**Usage Examples:**
+
+```rust
+// Internal operations - use anyhow::Result
+use anyhow::{Context, Result as AnyhowResult};
+
+async fn load_configuration() -> AnyhowResult<Config> {
+    let config = Figment::new()
+        .merge(Toml::file("config.toml"))
+        .extract::<Config>()
+        .context("Failed to load configuration")?;
+    Ok(config)
 }
+
+// API handlers - use AppResult
+use crate::errors::AppResult;
+
+pub async fn chat_handler(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<AnthropicRequest>,
+) -> AppResult<Response> {
+    let provider = match_provider(&request.model, &state)?; // any error becomes AppError
+    // ...
+    Ok(response)
+}
+
+// Converting anyhow errors to AppError
+let result = load_configuration()
+    .map_err(|e| AppError::ConfigError(e.to_string()))?;
 ```
 
 ### 4. `server.rs` - Web Server Core Logic
@@ -571,3 +654,67 @@ impl AIProvider for GeminiProvider {
 - Handle cancellation properly
 - Avoid blocking operations
 - Use appropriate timeouts
+
+### Dependencies
+
+Add to `Cargo.toml`:
+```toml
+[dependencies]
+# ... existing dependencies ...
+anyhow = "1.0"
+thiserror = "2.0"
+```
+
+### Benefits of Enhanced Error Handling
+
+1. **Better Error Context**: `anyhow` provides rich error context with `.context()`
+2. **Type Safety**: `thiserror` ensures well-typed errors for API responses
+3. **Ergonomic**: Simplified error handling with `?` operator
+4. **Maintainable**: Clear separation between internal and external errors
+5. **Extensible**: Easy to add new error types without breaking changes
+
+## 高级设计与优化
+
+本节探讨了在现有坚实基础上可以进一步增强系统健壮性、可维护性和可扩展性的高级设计模式和优化策略。
+
+### 1. 配置热重载 (Configuration Hot-Reloading)
+
+**挑战**: 对于需要7x24小时运行的代理服务，在不中断服务的情况下更新配置（如添加新模型、更改API密钥或调整速率限制）至关重要。
+
+**建议方案**: 引入配置热重载机制。可以利用 `tokio::sync::watch` 通道来分发更新后的配置。应用启动时，一个独立的任务会监视配置文件的变化。当检测到变更时，它会重新加载配置并将其发送到 `watch` 通道。应用中需要访问配置的各个部分（如 `AppState` 或特定的服务）则持有该通道的接收端。这样，它们就可以在不重启整个应用的情况下，对配置变更做出反应。
+
+### 2. 中间件与请求生命周期 (Middleware and Request Lifecycle)
+
+**挑战**: 认证、日志、速率限制和指标收集等横切关注点（Cross-Cutting Concerns）需要在核心业务逻辑之外统一处理。
+
+**建议方案**: 在 `server.rs` 中明确定义一个中间件层。Axum 基于 `tower::Layer` 和 `ServiceBuilder` 提供了强大的中间件支持。可以设计一系列可重用的中间件来处理请求生命周期中的通用任务：
+
+- **日志中间件**: 记录每个请求的详细信息（如请求ID、路径、来源IP、处理延迟、响应状态码）。
+- **认证中间件**: 在请求到达核心 `chat_handler` 之前，验证 `Authorization` 头中的凭据。
+- **速率限制中间件**: 基于客户端IP或API密钥实施灵活的速率限制策略，以防止滥用。
+- **指标中间件**: 收集并导出 Prometheus 指标，例如请求总数（`http_requests_total`）、错误率和延迟直方图（`http_request_duration_seconds`）。
+
+### 3. 动态提供者路由 (Dynamic Provider Routing)
+
+**挑战**: `server.rs` 中的 `match_provider` 函数使用硬编码的 `if-else` 逻辑来选择提供者。随着支持的提供者增多，这种方式会变得笨重且难以维护。
+
+**建议方案**: 实现一个更具扩展性的动态提供者路由机制。可以在 `AppState` 中维护一个 `HashMap<String, Arc<dyn AIProvider>>`。应用启动时，根据配置文件动态地初始化所有提供者，并将其注册到这个 `HashMap` 中。`match_provider` 函数的逻辑可以简化为直接从 `HashMap` 中根据模型名称查找对应的提供者实例。这种方法不仅简化了代码，还使得在运行时（结合配置热重载）添加或移除提供者成为可能。
+
+### 4. 深化测试策略 (Advanced Testing Strategies)
+
+**挑战**: 集成测试依赖于外部AI提供者的API，这会导致测试不稳定、缓慢且成本高昂。
+
+**建议方案**: 推荐使用 `wiremock-rs` 或 `mockall` 等库来模拟外部API。`wiremock-rs` 可以启动一个本地HTTP服务器，用于模拟真实的API行为，允许你精确控制响应内容、状态码和延迟。这使得集成测试可以：
+
+- **完全独立**: 不再需要网络连接或真实的API密钥。
+- **确定性高**: 确保测试在任何环境下都产生相同的结果。
+- **覆盖全面**: 轻松模拟各种成功和失败的场景，包括API错误、网络超时、格式错误等，从而验证应用的错误处理逻辑。
+
+### 5. 增强可观测性 (Enhanced Observability)
+
+**挑战**: 单纯的日志记录不足以全面了解系统在高负载下的行为和性能瓶颈。
+
+**建议方案**: 构建一个由日志、指标和分布式追踪组成的三位一体可观测性体系。
+
+- **指标 (Metrics)**: 集成 `metrics` 和 `metrics-exporter-prometheus` 库，在应用中暴露一个 `/metrics` 端点。通过这个端点，可以监控关键业务指标，如请求总数、错误率、各提供者的使用分布、处理延迟等。
+- **分布式追踪 (Distributed Tracing)**: 集成 `tracing-opentelemetry`，将 `tracing` 的 spans 导出到兼容 OpenTelemetry 的后端（如 Jaeger 或 Zipkin）。这对于理解一个复杂请求在系统内部的完整调用链非常有价值，尤其是在排查性能瓶颈和分布式环境中的错误时。
