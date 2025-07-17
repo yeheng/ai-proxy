@@ -22,12 +22,14 @@ src/
 ### 1. `main.rs` - Application Entry Point
 
 **Responsibilities:**
+
 - Initialize global services (logging, configuration)
 - Create and configure Axum Web server
 - Build shared application state `AppState`
 - Define routes and start service
 
 **Code Structure:**
+
 ```rust
 // src/main.rs
 
@@ -79,11 +81,13 @@ async fn main() {
 ### 2. `config.rs` - Configuration Management
 
 **Responsibilities:**
+
 - Define Rust structs matching `config.toml` structure
 - Provide configuration loading function
 - Support environment variable overrides
 
 **Implementation:**
+
 ```rust
 // src/config.rs
 
@@ -121,11 +125,13 @@ pub fn load_config() -> Result<Config, figment::Error> {
 ### 3. `errors.rs` - Unified Error Handling
 
 **Responsibilities:**
+
 - Define global `AppError` enum for all error types
 - Implement `IntoResponse` for HTTP error responses
 - Provide error conversion traits
 
 **Implementation:**
+
 ```rust
 // src/errors.rs
 
@@ -192,12 +198,14 @@ impl From<serde_json::Error> for AppError {
 ### 4. `server.rs` - Web Server Core Logic
 
 **Responsibilities:**
+
 - Define shared state `AppState`
 - Implement core `chat_handler` for request processing
 - Handle provider routing and selection
 - Manage streaming vs non-streaming responses
 
 **Implementation:**
+
 ```rust
 // src/server.rs
 
@@ -290,11 +298,13 @@ fn match_provider(
 ### 5. `providers/mod.rs` - Provider Interface
 
 **Responsibilities:**
+
 - Define `AIProvider` trait that all providers must implement
 - Export provider implementations
 - Define common types for streaming responses
 
 **Implementation:**
+
 ```rust
 // src/providers/mod.rs
 
@@ -324,11 +334,13 @@ pub trait AIProvider: Send + Sync {
 ### 6. `providers/anthropic.rs` - API Format Definitions
 
 **Responsibilities:**
+
 - Define common API format based on Anthropic API
 - Provide request/response structures used by all providers
 - Ensure consistency across different AI providers
 
 **Implementation:**
+
 ```rust
 // src/providers/anthropic.rs
 
@@ -406,12 +418,14 @@ pub struct StopReasonDelta {
 ### 7. `providers/gemini.rs` - Provider Implementation Example
 
 **Responsibilities:**
+
 - Implement `AIProvider` trait for Google Gemini
 - Handle Gemini-specific API calls
 - Convert between Anthropic format and Gemini format
 - Implement both streaming and non-streaming
 
 **Implementation Structure:**
+
 ```rust
 // src/providers/gemini.rs
 
@@ -511,16 +525,19 @@ impl AIProvider for GeminiProvider {
 ### Testing Strategy
 
 #### Unit Tests
+
 - Test provider-specific request/response conversion
 - Test error handling edge cases
 - Test configuration loading
 
 #### Integration Tests
+
 - Test full request/response flow
 - Test streaming functionality
 - Test provider switching
 
 #### Load Tests
+
 - Test concurrent request handling
 - Test memory usage under load
 - Test provider rate limit handling
@@ -528,24 +545,28 @@ impl AIProvider for GeminiProvider {
 ## Best Practices
 
 ### Code Organization
+
 - Keep modules small and focused
 - Use clear naming conventions
 - Document public APIs
 - Handle errors gracefully
 
 ### Performance
+
 - Use connection pooling for HTTP clients
 - Implement proper streaming for large responses
 - Cache provider configurations
 - Monitor memory usage
 
 ### Security
+
 - Never log API keys or sensitive data
 - Validate all input parameters
 - Use HTTPS for all external requests
 - Implement rate limiting
 
 ### Async/Await
+
 - Use `Send + Sync` bounds for trait objects
 - Handle cancellation properly
 - Avoid blocking operations
