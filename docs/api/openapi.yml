@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: AI Proxy API
+  description: Unified API proxy for multiple AI providers (Gemini, OpenAI, Anthropic, etc.)
+  version: 1.0.0
+  contact:
+    name: AI Proxy Team
+    email: support@ai-proxy.dev
+servers:
+  - url: http://localhost:3000/v1
+    description: Local development server
+
+paths:
+  /messages:
+    post:
+      summary: Create chat completion
+      description: Creates a chat completion using the specified model
+      operationId: createChatCompletion
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /models:
+    get:
+      summary: List available models
+      description: Returns a list of available models
+      operationId: listModels
+      tags:
+        - Models
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelListResponse'
+
+components:
+  schemas:
+    ChatCompletionRequest:
+      type: object
+      required:
+        - model
+        - messages
+        - max_tokens
+      properties:
+        model:
+          type: string
+          description: ID of the model to use
+          example: "gemini-1.5-pro-latest"
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+          description: Array of messages comprising the conversation
+        max_tokens:
+          type: integer
+          description: Maximum number of tokens to generate
+          minimum: 1
+          maximum: 4096
+          example: 1024
+        stream:
+          type: boolean
+          description: Whether to stream back partial progress
+          default: false
+          example: false
+        temperature:
+          type: number
+          description: Sampling temperature
+          minimum: 0.0
+          maximum: 2.0
+          default: 1.0
+          example: 0.7
+        top_p:
+          type: number
+          description: Top-p sampling parameter
+          minimum: 0.0
+          maximum: 1.0
+          default: 1.0
+          example: 1.0
+
+    Message:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+          description: Role of the message author
+        content:
+          type: string
+          description: Content of the message
+
+    ChatCompletionResponse:
+      type: object
+      required:
+        - id
+        - model
+        - content
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the completion
+          example: "msg_123abc"
+        model:
+          type: string
+          description: Model used for completion
+          example: "gemini-1.5-pro-latest"
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentBlock'
+        usage:
+          $ref: '#/components/schemas/Usage'
+
+    ContentBlock:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum: [text]
+          description: Type of content block
+        text:
+          type: string
+          description: Text content
+
+    Usage:
+      type: object
+      properties:
+        input_tokens:
+          type: integer
+          description: Number of tokens in the prompt
+          example: 10
+        output_tokens:
+          type: integer
+          description: Number of tokens in the completion
+          example: 8
+
+    ModelListResponse:
+      type: object
+      required:
+        - object
+        - data
+      properties:
+        object:
+          type: string
+          example: "list"
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Model'
+
+    Model:
+      type: object
+      required:
+        - id
+        - object
+      properties:
+        id:
+          type: string
+          description: Model identifier
+          example: "gemini-1.5-pro-latest"
+        object:
+          type: string
+          example: "model"
+        created:
+          type: integer
+          format: int64
+          description: Unix timestamp when the model was created
+        owned_by:
+          type: string
+          description: Organization that owns the model
+          example: "google"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - message
+          properties:
+            message:
+              type: string
+              description: Error message
+            type:
+              type: string
+              description: Error type
+            param:
+              type: string
+              description: Parameter that caused the error
+            code:
+              type: string
+              description: Error code
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []
