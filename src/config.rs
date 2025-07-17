@@ -3,13 +3,13 @@ use figment::{Figment, providers::{Format, Toml, Env}};
 use std::collections::HashMap;
 use anyhow::{Context, Result};
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub providers: HashMap<String, ProviderDetail>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,

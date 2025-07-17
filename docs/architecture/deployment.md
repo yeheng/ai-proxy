@@ -17,23 +17,27 @@ curl -X POST http://localhost:3000/v1/messages \
 ### Development Setup
 
 1. **Clone Repository**
+
    ```bash
    git clone <repository-url>
    cd ai-proxy
    ```
 
 2. **Install Dependencies**
+
    ```bash
    cargo build
    ```
 
 3. **Configuration**
+
    ```bash
    cp config.example.toml config.toml
    # Edit config.toml with your API keys
    ```
 
 4. **Run Tests**
+
    ```bash
    cargo test
    ```
@@ -43,6 +47,7 @@ curl -X POST http://localhost:3000/v1/messages \
 ### Containerization
 
 **Dockerfile**
+
 ```dockerfile
 FROM rust:1.70 as builder
 WORKDIR /app
@@ -61,6 +66,7 @@ CMD ["./ai-proxy", "--config", "config.toml"]
 ### Kubernetes Deployment
 
 **Deployment.yaml**
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -101,16 +107,19 @@ spec:
 ### Monitoring and Observability
 
 #### Metrics Collection
+
 - **Prometheus**: Metrics scraping and storage
 - **Grafana**: Visualization and dashboards
 - **Custom Metrics**: Request count, latency, error rates
 
 #### Health Checks
+
 - **Liveness Probe**: `/health/live`
 - **Readiness Probe**: `/health/ready`
 - **Startup Probe**: `/health/startup`
 
 #### Logging
+
 - **Structured Logging**: JSON format with correlation IDs
 - **Centralized Logging**: ELK Stack or Fluentd
 - **Log Levels**: Configurable via environment variables
@@ -118,15 +127,18 @@ spec:
 ### Cloud Deployment Options
 
 #### AWS
+
 - **ECS**: Amazon Elastic Container Service
 - **EKS**: Amazon Elastic Kubernetes Service
 - **Fargate**: Serverless container deployment
 
 #### Google Cloud
+
 - **GKE**: Google Kubernetes Engine
 - **Cloud Run**: Serverless container deployment
 
 #### Azure
+
 - **AKS**: Azure Kubernetes Service
 - **Container Instances**: Serverless container deployment
 
@@ -146,6 +158,7 @@ spec:
 ### Secrets Management
 
 #### Kubernetes Secrets
+
 ```yaml
 apiVersion: v1
 kind: Secret
@@ -159,6 +172,7 @@ data:
 ```
 
 #### AWS Secrets Manager
+
 ```bash
 aws secretsmanager create-secret \
   --name ai-proxy/api-keys \
@@ -168,16 +182,19 @@ aws secretsmanager create-secret \
 ## Performance Tuning
 
 ### Rust Optimization
+
 - **Release Build**: Use `cargo build --release` for production
 - **Link-time Optimization**: Enable LTO in Cargo.toml
 - **Profile-guided Optimization**: Use `cargo pgo` for maximum performance
 
 ### System Optimization
+
 - **CPU**: Multi-core systems for concurrent request handling
 - **Memory**: Sufficient RAM for connection pooling and caching
 - **Network**: High-bandwidth, low-latency network for provider communication
 
 ### Scaling Strategies
+
 - **Horizontal Scaling**: Multiple instances behind load balancer
 - **Vertical Scaling**: More CPU/memory per instance
 - **Auto-scaling**: Based on request volume and resource usage
