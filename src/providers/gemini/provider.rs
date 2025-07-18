@@ -86,38 +86,7 @@ impl GeminiProvider {
 impl GeminiProvider {
     /// Convert Anthropic request format to Gemini format
     fn convert_request(&self, request: &AnthropicRequest) -> Result<GeminiRequest, AppError> {
-        let contents = request
-            .messages
-            .iter()
-            .map(|msg| {
-                let role = match msg.role.as_str() {
-                    "user" => "user",
-                    "assistant" => "model", // Gemini uses "model" instead of "assistant"
-                    _ => {
-                        return Err(AppError::ValidationError(format!(
-                            "Invalid role: {}",
-                            msg.role
-                        )));
-                    }
-                };
-
-                Ok(GeminiContent {
-                    role: role.to_string(),
-                    parts: vec![GeminiPart {
-                        text: msg.content.clone(),
-                    }],
-                })
-            })
-            .collect::<Result<Vec<_>, AppError>>()?;
-
-        Ok(GeminiRequest {
-            contents,
-            generation_config: GenerationConfig {
-                max_output_tokens: request.max_tokens,
-                temperature: request.temperature,
-                top_p: request.top_p,
-            },
-        })
+        GeminiRequest::from_anthropic(request)
     }
 
     /// Convert Gemini response format to Anthropic format
@@ -126,37 +95,7 @@ impl GeminiProvider {
         gemini_res: GeminiResponse,
         model: &str,
     ) -> Result<AnthropicResponse, AppError> {
-        let candidate =
-            gemini_res
-                .candidates
-                .into_iter()
-                .next()
-                .ok_or_else(|| AppError::ProviderError {
-                    status: 500,
-                    message: "No candidates in Gemini response".to_string(),
-                })?;
-
-        let text = candidate
-            .content
-            .parts
-            .into_iter()
-            .map(|part| part.text)
-            .collect::<Vec<_>>()
-            .join("");
-
-        let usage = gemini_res.usage_metadata.unwrap_or(UsageMetadata {
-            prompt_token_count: Some(0),
-            candidates_token_count: Some(0),
-            total_token_count: Some(0),
-        });
-
-        Ok(AnthropicResponse::new(
-            format!("msg_{}", uuid::Uuid::new_v4().simple()),
-            model.to_string(),
-            text,
-            usage.prompt_token_count.unwrap_or(0),
-            usage.candidates_token_count.unwrap_or(0),
-        ))
+        gemini_res.to_anthropic(model)
     }
 }
 
