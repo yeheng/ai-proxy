@@ -1,11 +1,10 @@
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     config::ProviderDetail,
     errors::AppError,
-    providers::{AIProvider, StreamResponse, ModelInfo, HealthStatus, anthropic::*},
+    providers::{AIProvider, HealthStatus, ModelInfo, StreamResponse, anthropic::*, openai::*},
 };
 
 /// OpenAI provider implementation
@@ -20,55 +19,17 @@ impl OpenAIProvider {
     }
 }
 
-// OpenAI-specific data structures for API communication
-
-#[derive(Serialize, Debug)]
-struct OpenAIRequest {
-    model: String,
-    messages: Vec<OpenAIMessage>,
-    max_tokens: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stream: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct OpenAIMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct OpenAIResponse {
-    id: String,
-    model: String,
-    choices: Vec<OpenAIChoice>,
-    usage: OpenAIUsage,
-}
-
-#[derive(Deserialize, Debug)]
-struct OpenAIChoice {
-    message: OpenAIMessage,
-    finish_reason: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct OpenAIUsage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    total_tokens: u32,
-}
-
 impl OpenAIProvider {
     /// Convert Anthropic request format to OpenAI format
     fn convert_request(&self, request: &AnthropicRequest) -> OpenAIRequest {
-        let messages = request.messages.iter().map(|msg| OpenAIMessage {
-            role: msg.role.clone(),
-            content: msg.content.clone(),
-        }).collect();
+        let messages = request
+            .messages
+            .iter()
+            .map(|msg| OpenAIMessage {
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+            })
+            .collect();
 
         OpenAIRequest {
             model: request.model.clone(),
@@ -82,11 +43,15 @@ impl OpenAIProvider {
 
     /// Convert OpenAI response format to Anthropic format
     fn convert_response(&self, openai_res: OpenAIResponse) -> Result<AnthropicResponse, AppError> {
-        let choice = openai_res.choices.into_iter().next()
-            .ok_or_else(|| AppError::ProviderError {
-                status: 500,
-                message: "No choices in OpenAI response".to_string(),
-            })?;
+        let choice =
+            openai_res
+                .choices
+                .into_iter()
+                .next()
+                .ok_or_else(|| AppError::ProviderError {
+                    status: 500,
+                    message: "No choices in OpenAI response".to_string(),
+                })?;
 
         Ok(AnthropicResponse::new(
             openai_res.id,
@@ -106,12 +71,13 @@ impl AIProvider for OpenAIProvider {
 
         // Convert to OpenAI format
         let openai_req = self.convert_request(&request);
-        
+
         // Build URL
         let url = format!("{}chat/completions", self.config.api_base);
 
         // Send request
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
@@ -134,11 +100,14 @@ impl AIProvider for OpenAIProvider {
         }
 
         // Parse response
-        let openai_res = response.json::<OpenAIResponse>().await
-            .map_err(|e| AppError::ProviderError {
-                status: 500,
-                message: format!("Failed to parse OpenAI response: {}", e),
-            })?;
+        let openai_res =
+            response
+                .json::<OpenAIResponse>()
+                .await
+                .map_err(|e| AppError::ProviderError {
+                    status: 500,
+                    message: format!("Failed to parse OpenAI response: {}", e),
+                })?;
 
         // Convert to standard format
         self.convert_response(openai_res)
@@ -147,35 +116,44 @@ impl AIProvider for OpenAIProvider {
     async fn chat_stream(&self, _request: AnthropicRequest) -> Result<StreamResponse, AppError> {
         // TODO: Implement streaming support
         Err(AppError::InternalServerError(
-            "Streaming not yet implemented for OpenAI provider".to_string()
+            "Streaming not yet implemented for OpenAI provider".to_string(),
         ))
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
-        let models = self.config.models.as_ref()
+        let models = self
+            .config
+            .models
+            .as_ref()
             .map(|m| m.clone())
-            .unwrap_or_else(|| vec![
-                "gpt-4".to_string(),
-                "gpt-4-turbo-preview".to_string(),
-                "gpt-3.5-turbo".to_string(),
-                "gpt-3.5-turbo-16k".to_string(),
-            ]);
+            .unwrap_or_else(|| {
+                vec![
+                    "gpt-4".to_string(),
+                    "gpt-4-turbo-preview".to_string(),
+                    "gpt-3.5-turbo".to_string(),
+                    "gpt-3.5-turbo-16k".to_string(),
+                ]
+            });
 
-        Ok(models.into_iter().map(|model| ModelInfo {
-            id: model,
-            object: "model".to_string(),
-            created: 1714560000, // Static timestamp for now
-            owned_by: "openai".to_string(),
-        }).collect())
+        Ok(models
+            .into_iter()
+            .map(|model| ModelInfo {
+                id: model,
+                object: "model".to_string(),
+                created: 1714560000, // Static timestamp for now
+                owned_by: "openai".to_string(),
+            })
+            .collect())
     }
 
     async fn health_check(&self) -> Result<HealthStatus, AppError> {
         let start = std::time::Instant::now();
-        
+
         // Simple health check by trying to list models
         let url = format!("{}models", self.config.api_base);
 
-        let result = self.client
+        let result = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .send()
@@ -184,30 +162,24 @@ impl AIProvider for OpenAIProvider {
         let latency = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(response) if response.status().is_success() => {
-                Ok(HealthStatus {
-                    status: "healthy".to_string(),
-                    provider: "openai".to_string(),
-                    latency_ms: Some(latency),
-                    error: None,
-                })
-            }
-            Ok(response) => {
-                Ok(HealthStatus {
-                    status: "unhealthy".to_string(),
-                    provider: "openai".to_string(),
-                    latency_ms: Some(latency),
-                    error: Some(format!("HTTP {}", response.status())),
-                })
-            }
-            Err(e) => {
-                Ok(HealthStatus {
-                    status: "unhealthy".to_string(),
-                    provider: "openai".to_string(),
-                    latency_ms: Some(latency),
-                    error: Some(e.to_string()),
-                })
-            }
+            Ok(response) if response.status().is_success() => Ok(HealthStatus {
+                status: "healthy".to_string(),
+                provider: "openai".to_string(),
+                latency_ms: Some(latency),
+                error: None,
+            }),
+            Ok(response) => Ok(HealthStatus {
+                status: "unhealthy".to_string(),
+                provider: "openai".to_string(),
+                latency_ms: Some(latency),
+                error: Some(format!("HTTP {}", response.status())),
+            }),
+            Err(e) => Ok(HealthStatus {
+                status: "unhealthy".to_string(),
+                provider: "openai".to_string(),
+                latency_ms: Some(latency),
+                error: Some(e.to_string()),
+            }),
         }
     }
 }
