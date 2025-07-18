@@ -21,6 +21,26 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
+    /// 创建新的Anthropic提供商实例
+    ///
+    /// ## 功能说明
+    /// 使用给定的配置和HTTP客户端创建Anthropic提供商实例。
+    /// 由于系统的标准格式基于Anthropic API，此提供商需要最少的格式转换。
+    ///
+    /// ## 参数说明
+    /// - `config`: Anthropic提供商的详细配置，包含API密钥、基础URL等
+    /// - `client`: 共享的HTTP客户端，用于发送API请求
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let config = ProviderDetail {
+    ///     api_key: "sk-ant-...".to_string(),
+    ///     api_base: "https://api.anthropic.com/v1/".to_string(),
+    ///     // ... 其他配置
+    /// };
+    /// let client = Client::new();
+    /// let provider = AnthropicProvider::new(config, client);
+    /// ```
     pub fn new(config: ProviderDetail, client: Client) -> Self {
         Self { config, client }
     }

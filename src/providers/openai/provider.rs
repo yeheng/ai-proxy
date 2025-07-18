@@ -14,6 +14,25 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
+    /// 创建新的OpenAI提供商实例
+    ///
+    /// ## 功能说明
+    /// 使用给定的配置和HTTP客户端创建OpenAI提供商实例
+    ///
+    /// ## 参数说明
+    /// - `config`: OpenAI提供商的详细配置，包含API密钥、基础URL等
+    /// - `client`: 共享的HTTP客户端，用于发送API请求
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let config = ProviderDetail {
+    ///     api_key: "sk-...".to_string(),
+    ///     api_base: "https://api.openai.com/v1/".to_string(),
+    ///     // ... 其他配置
+    /// };
+    /// let client = Client::new();
+    /// let provider = OpenAIProvider::new(config, client);
+    /// ```
     pub fn new(config: ProviderDetail, client: Client) -> Self {
         Self { config, client }
     }

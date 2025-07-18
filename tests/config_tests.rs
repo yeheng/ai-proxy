@@ -4,15 +4,18 @@ use std::collections::HashMap;
 // Helper function to create a valid config for testing
 fn create_valid_config() -> Config {
     let mut providers = HashMap::new();
-    providers.insert("test_provider".to_string(), ProviderDetail {
-        api_key: "test-api-key-1234567890".to_string(),
-        api_base: "https://api.example.com/v1/".to_string(),
-        models: Some(vec!["model1".to_string(), "model2".to_string()]),
-        timeout_seconds: 60,
-        max_retries: 3,
-        enabled: true,
-        rate_limit: None,
-    });
+    providers.insert(
+        "test_provider".to_string(),
+        ProviderDetail {
+            api_key: "test-api-key-1234567890".to_string(),
+            api_base: "https://api.example.com/v1/".to_string(),
+            models: Some(vec!["model1".to_string(), "model2".to_string()]),
+            timeout_seconds: 60,
+            max_retries: 3,
+            enabled: true,
+            rate_limit: None,
+        },
+    );
 
     Config {
         server: ServerConfig {
@@ -47,7 +50,12 @@ fn test_config_validation_no_providers() {
     config.providers.clear();
     let result = config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("At least one provider must be configured"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("At least one provider must be configured")
+    );
 }
 
 #[test]
@@ -71,7 +79,12 @@ fn test_server_config_validation_empty_host() {
     };
     let result = server_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Server host cannot be empty"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Server host cannot be empty")
+    );
 }
 
 #[test]
@@ -84,7 +97,12 @@ fn test_server_config_validation_zero_port() {
     };
     let result = server_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Server port cannot be 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Server port cannot be 0")
+    );
 }
 
 #[test]
@@ -97,7 +115,12 @@ fn test_server_config_validation_invalid_timeout() {
     };
     let result = server_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Request timeout must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Request timeout must be greater than 0")
+    );
 
     let server_config = ServerConfig {
         host: "127.0.0.1".to_string(),
@@ -107,7 +130,12 @@ fn test_server_config_validation_invalid_timeout() {
     };
     let result = server_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Request timeout cannot exceed 300 seconds"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Request timeout cannot exceed 300 seconds")
+    );
 }
 
 #[test]
@@ -120,7 +148,12 @@ fn test_server_config_validation_invalid_request_size() {
     };
     let result = server_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Max request size must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Max request size must be greater than 0")
+    );
 
     let server_config = ServerConfig {
         host: "127.0.0.1".to_string(),
@@ -130,7 +163,12 @@ fn test_server_config_validation_invalid_request_size() {
     };
     let result = server_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Max request size cannot exceed 100MB"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Max request size cannot exceed 100MB")
+    );
 }
 
 #[test]
@@ -160,7 +198,12 @@ fn test_provider_detail_validation_empty_api_key() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider API key cannot be empty"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider API key cannot be empty")
+    );
 }
 
 #[test]
@@ -176,7 +219,12 @@ fn test_provider_detail_validation_short_api_key() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider API key seems too short"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider API key seems too short")
+    );
 }
 
 #[test]
@@ -192,7 +240,12 @@ fn test_provider_detail_validation_invalid_api_base() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider API base URL cannot be empty"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider API base URL cannot be empty")
+    );
 
     let provider = ProviderDetail {
         api_key: "valid-api-key-1234567890".to_string(),
@@ -205,7 +258,12 @@ fn test_provider_detail_validation_invalid_api_base() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider API base URL must start with http:// or https://"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider API base URL must start with http:// or https://")
+    );
 }
 
 #[test]
@@ -221,7 +279,12 @@ fn test_provider_detail_validation_invalid_timeout() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider timeout must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider timeout must be greater than 0")
+    );
 
     let provider = ProviderDetail {
         api_key: "valid-api-key-1234567890".to_string(),
@@ -234,7 +297,12 @@ fn test_provider_detail_validation_invalid_timeout() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider timeout cannot exceed 600 seconds"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider timeout cannot exceed 600 seconds")
+    );
 }
 
 #[test]
@@ -250,7 +318,12 @@ fn test_provider_detail_validation_invalid_max_retries() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider max retries cannot exceed 10"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider max retries cannot exceed 10")
+    );
 }
 
 #[test]
@@ -266,7 +339,12 @@ fn test_provider_detail_validation_empty_models_list() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider models list cannot be empty if specified"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider models list cannot be empty if specified")
+    );
 }
 
 #[test]
@@ -282,7 +360,12 @@ fn test_provider_detail_validation_empty_model_name() {
     };
     let result = provider.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Provider model name cannot be empty"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Provider model name cannot be empty")
+    );
 }
 
 #[test]
@@ -306,7 +389,12 @@ fn test_logging_config_validation_invalid_level() {
     };
     let result = logging_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Invalid log level 'invalid'"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid log level 'invalid'")
+    );
 }
 
 #[test]
@@ -319,7 +407,12 @@ fn test_logging_config_validation_invalid_format() {
     };
     let result = logging_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Invalid log format 'invalid'"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid log format 'invalid'")
+    );
 }
 
 #[test]
@@ -343,7 +436,12 @@ fn test_security_config_validation_empty_api_key() {
     };
     let result = security_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Security API key cannot be empty"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Security API key cannot be empty")
+    );
 }
 
 #[test]
@@ -356,7 +454,12 @@ fn test_security_config_validation_short_api_key() {
     };
     let result = security_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Security API key must be at least 16 characters long"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Security API key must be at least 16 characters long")
+    );
 }
 
 #[test]
@@ -369,7 +472,12 @@ fn test_security_config_validation_invalid_origin() {
     };
     let result = security_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Allowed origin cannot be empty"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Allowed origin cannot be empty")
+    );
 
     let security_config = SecurityConfig {
         api_keys: vec![],
@@ -379,7 +487,12 @@ fn test_security_config_validation_invalid_origin() {
     };
     let result = security_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("must be '*' or start with http:// or https://"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("must be '*' or start with http:// or https://")
+    );
 }
 
 #[test]
@@ -401,7 +514,12 @@ fn test_performance_config_validation_invalid_pool_size() {
     };
     let result = performance_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Connection pool size must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Connection pool size must be greater than 0")
+    );
 
     let performance_config = PerformanceConfig {
         connection_pool_size: 1001,
@@ -410,7 +528,12 @@ fn test_performance_config_validation_invalid_pool_size() {
     };
     let result = performance_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Connection pool size cannot exceed 1000"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Connection pool size cannot exceed 1000")
+    );
 }
 
 #[test]
@@ -422,7 +545,12 @@ fn test_performance_config_validation_invalid_keep_alive() {
     };
     let result = performance_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Keep alive timeout must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Keep alive timeout must be greater than 0")
+    );
 
     let performance_config = PerformanceConfig {
         connection_pool_size: 10,
@@ -431,7 +559,12 @@ fn test_performance_config_validation_invalid_keep_alive() {
     };
     let result = performance_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Keep alive timeout cannot exceed 3600 seconds"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Keep alive timeout cannot exceed 3600 seconds")
+    );
 }
 
 #[test]
@@ -443,7 +576,12 @@ fn test_performance_config_validation_invalid_concurrent_requests() {
     };
     let result = performance_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Max concurrent requests must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Max concurrent requests must be greater than 0")
+    );
 
     let performance_config = PerformanceConfig {
         connection_pool_size: 10,
@@ -452,7 +590,12 @@ fn test_performance_config_validation_invalid_concurrent_requests() {
     };
     let result = performance_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Max concurrent requests cannot exceed 10000"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Max concurrent requests cannot exceed 10000")
+    );
 }
 
 #[test]
@@ -472,7 +615,12 @@ fn test_rate_limit_config_validation_invalid_requests_per_minute() {
     };
     let result = rate_limit_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Requests per minute must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Requests per minute must be greater than 0")
+    );
 
     let rate_limit_config = RateLimitConfig {
         requests_per_minute: 10001,
@@ -480,7 +628,12 @@ fn test_rate_limit_config_validation_invalid_requests_per_minute() {
     };
     let result = rate_limit_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Requests per minute cannot exceed 10000"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Requests per minute cannot exceed 10000")
+    );
 }
 
 #[test]
@@ -491,7 +644,12 @@ fn test_rate_limit_config_validation_invalid_burst_size() {
     };
     let result = rate_limit_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Burst size must be greater than 0"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Burst size must be greater than 0")
+    );
 
     let rate_limit_config = RateLimitConfig {
         requests_per_minute: 100,
@@ -499,7 +657,12 @@ fn test_rate_limit_config_validation_invalid_burst_size() {
     };
     let result = rate_limit_config.validate();
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Burst size cannot exceed requests per minute"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Burst size cannot exceed requests per minute")
+    );
 }
 
 #[test]

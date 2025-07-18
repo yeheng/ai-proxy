@@ -25,39 +25,80 @@ pub struct Message {
 }
 
 impl Message {
-    /// Validate individual message
+    /// 验证单个消息的有效性
+    ///
+    /// ## 功能说明
+    /// 验证消息的角色和内容是否符合API规范要求
+    ///
+    /// ## 内部实现逻辑
+    /// 1. 验证角色必须是"user"或"assistant"
+    /// 2. 验证内容不能为空
+    /// 3. 验证内容长度不超过100KB
+    /// 4. 检查内容中不包含空字节等问题字符
+    ///
+    /// ## 验证规则
+    /// - `role`: 必须是"user"或"assistant"
+    /// - `content`: 不能为空，长度不超过100,000字符，不包含空字节
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let message = Message::user("Hello, AI!".to_string());
+    /// message.validate()?;
+    /// ```
     pub fn validate(&self) -> Result<(), String> {
-        // Role validation
+        // 角色验证
         if self.role != "user" && self.role != "assistant" {
             return Err(format!("Invalid role '{}': must be 'user' or 'assistant'", self.role));
         }
-        
-        // Content validation
+
+        // 内容验证
         if self.content.is_empty() {
             return Err("Message content cannot be empty".to_string());
         }
-        
+
         if self.content.len() > 100_000 {
             return Err("Message content too long (max 100KB)".to_string());
         }
-        
-        // Check for null bytes or other problematic characters
+
+        // 检查空字节或其他问题字符
         if self.content.contains('\0') {
             return Err("Message content cannot contain null bytes".to_string());
         }
-        
+
         Ok(())
     }
-    
-    /// Create a new user message
+
+    /// 创建新的用户消息
+    ///
+    /// ## 功能说明
+    /// 便捷方法，创建角色为"user"的消息实例
+    ///
+    /// ## 参数说明
+    /// - `content`: 消息内容
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let user_msg = Message::user("What's the weather like?".to_string());
+    /// ```
     pub fn user(content: String) -> Self {
         Self {
             role: "user".to_string(),
             content,
         }
     }
-    
-    /// Create a new assistant message
+
+    /// 创建新的助手消息
+    ///
+    /// ## 功能说明
+    /// 便捷方法，创建角色为"assistant"的消息实例
+    ///
+    /// ## 参数说明
+    /// - `content`: 消息内容
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let assistant_msg = Message::assistant("The weather is sunny today.".to_string());
+    /// ```
     pub fn assistant(content: String) -> Self {
         Self {
             role: "assistant".to_string(),
@@ -208,23 +249,53 @@ impl SSEEvent {
 }
 
 impl AnthropicRequest {
-    /// Validate the request parameters with comprehensive checks
+    /// 全面验证请求参数的有效性
+    ///
+    /// ## 功能说明
+    /// 对聊天请求的所有参数进行全面验证，确保请求符合API规范
+    ///
+    /// ## 内部实现逻辑
+    /// 1. 验证模型名称的格式和有效性
+    /// 2. 验证消息数组的结构和内容
+    /// 3. 验证token限制的合理性
+    /// 4. 验证可选参数的取值范围
+    /// 5. 验证总内容长度不超过限制
+    ///
+    /// ## 验证项目
+    /// - **模型验证**: 名称格式、长度限制
+    /// - **消息验证**: 数量限制、角色序列、内容有效性
+    /// - **Token验证**: max_tokens范围检查
+    /// - **参数验证**: temperature和top_p取值范围
+    /// - **长度验证**: 总内容长度限制
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let request = AnthropicRequest {
+    ///     model: "claude-3-sonnet".to_string(),
+    ///     messages: vec![Message::user("Hello".to_string())],
+    ///     max_tokens: 1000,
+    ///     temperature: Some(0.7),
+    ///     top_p: Some(0.9),
+    ///     stream: Some(false),
+    /// };
+    /// request.validate()?;
+    /// ```
     pub fn validate(&self) -> Result<(), String> {
-        // Model validation
+        // 模型验证
         self.validate_model()?;
-        
-        // Messages validation
+
+        // 消息验证
         self.validate_messages()?;
-        
-        // Token limits validation
+
+        // Token限制验证
         self.validate_token_limits()?;
-        
-        // Parameter ranges validation
+
+        // 参数范围验证
         self.validate_parameters()?;
-        
-        // Content length validation
+
+        // 内容长度验证
         self.validate_content_length()?;
-        
+
         Ok(())
     }
     
@@ -328,14 +399,47 @@ impl AnthropicRequest {
         Ok(())
     }
     
-    /// Check if request is for streaming
+    /// 检查请求是否为流式传输
+    ///
+    /// ## 功能说明
+    /// 检查请求是否启用了流式响应模式
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// if request.is_streaming() {
+    ///     // 处理流式响应
+    /// } else {
+    ///     // 处理普通响应
+    /// }
+    /// ```
+    ///
+    /// ## 返回值
+    /// - `true`: 启用流式传输
+    /// - `false`: 使用普通响应模式
     pub fn is_streaming(&self) -> bool {
         self.stream.unwrap_or(false)
     }
-    
-    /// Get estimated token count (rough approximation)
+
+    /// 估算输入token数量（粗略近似）
+    ///
+    /// ## 功能说明
+    /// 基于字符数量粗略估算请求的输入token数量
+    ///
+    /// ## 内部实现逻辑
+    /// 1. 计算所有消息内容和角色的总字符数
+    /// 2. 使用1 token ≈ 4字符的粗略比例进行估算
+    /// 3. 确保至少返回1个token
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let estimated_tokens = request.estimate_input_tokens();
+    /// println!("Estimated input tokens: {}", estimated_tokens);
+    /// ```
+    ///
+    /// ## 返回值
+    /// - `u32`: 估算的输入token数量
     pub fn estimate_input_tokens(&self) -> u32 {
-        // Rough estimation: 1 token ≈ 4 characters
+        // 粗略估算：1 token ≈ 4 字符
         let total_chars: usize = self.messages.iter()
             .map(|m| m.content.len() + m.role.len())
             .sum();
@@ -344,7 +448,34 @@ impl AnthropicRequest {
 }
 
 impl AnthropicResponse {
-    /// Create a new response with the given parameters
+    /// 创建新的响应对象
+    ///
+    /// ## 功能说明
+    /// 便捷方法，根据给定参数创建标准格式的Anthropic响应对象
+    ///
+    /// ## 内部实现逻辑
+    /// 1. 设置响应ID和模型名称
+    /// 2. 创建包含文本内容的ContentBlock
+    /// 3. 设置token使用统计信息
+    /// 4. 返回完整的响应对象
+    ///
+    /// ## 参数说明
+    /// - `id`: 响应的唯一标识符
+    /// - `model`: 使用的模型名称
+    /// - `text`: 生成的文本内容
+    /// - `input_tokens`: 输入消耗的token数量
+    /// - `output_tokens`: 输出生成的token数量
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let response = AnthropicResponse::new(
+    ///     "msg_123".to_string(),
+    ///     "claude-3-sonnet".to_string(),
+    ///     "Hello! How can I help you?".to_string(),
+    ///     10,
+    ///     25
+    /// );
+    /// ```
     pub fn new(id: String, model: String, text: String, input_tokens: u32, output_tokens: u32) -> Self {
         Self {
             id,

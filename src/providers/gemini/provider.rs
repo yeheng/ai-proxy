@@ -14,6 +14,25 @@ pub struct GeminiProvider {
 }
 
 impl GeminiProvider {
+    /// 创建新的Gemini提供商实例
+    ///
+    /// ## 功能说明
+    /// 使用给定的配置和HTTP客户端创建Google Gemini提供商实例
+    ///
+    /// ## 参数说明
+    /// - `config`: Gemini提供商的详细配置，包含API密钥、基础URL等
+    /// - `client`: 共享的HTTP客户端，用于发送API请求
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let config = ProviderDetail {
+    ///     api_key: "AIza...".to_string(),
+    ///     api_base: "https://generativelanguage.googleapis.com/v1beta/".to_string(),
+    ///     // ... 其他配置
+    /// };
+    /// let client = Client::new();
+    /// let provider = GeminiProvider::new(config, client);
+    /// ```
     pub fn new(config: ProviderDetail, client: Client) -> Self {
         Self { config, client }
     }

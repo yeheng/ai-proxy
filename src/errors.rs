@@ -67,14 +67,51 @@ pub enum AppError {
 }
 
 impl AppError {
+    /// 创建错误请求错误
+    ///
+    /// ## 功能说明
+    /// 便捷方法，创建BadRequest类型的错误，用于客户端请求格式错误的情况
+    ///
+    /// ## 参数说明
+    /// - `msg`: 错误消息，可以是任何能转换为String的类型
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// return Err(AppError::bad_request("Invalid JSON format"));
+    /// ```
     pub fn bad_request(msg: impl Into<String>) -> Self {
         Self::BadRequest(msg.into())
     }
 
+    /// 创建提供商未找到错误
+    ///
+    /// ## 功能说明
+    /// 便捷方法，创建ProviderNotFound类型的错误，用于找不到支持指定模型的提供商
+    ///
+    /// ## 参数说明
+    /// - `msg`: 错误消息，通常包含模型名称和可用模型列表
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// return Err(AppError::provider_not_found("No provider for model gpt-5"));
+    /// ```
     pub fn provider_not_found(msg: impl Into<String>) -> Self {
         Self::ProviderNotFound(msg.into())
     }
 
+    /// 创建提供商错误
+    ///
+    /// ## 功能说明
+    /// 便捷方法，创建ProviderError类型的错误，用于AI提供商API返回错误的情况
+    ///
+    /// ## 参数说明
+    /// - `status`: HTTP状态码
+    /// - `message`: 错误消息，通常来自提供商的错误响应
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// return Err(AppError::provider_error(429, "Rate limit exceeded"));
+    /// ```
     pub fn provider_error(status: u16, message: impl Into<String>) -> Self {
         Self::ProviderError {
             status,
@@ -82,6 +119,18 @@ impl AppError {
         }
     }
 
+    /// 创建内部服务器错误
+    ///
+    /// ## 功能说明
+    /// 便捷方法，创建InternalServerError类型的错误，用于系统内部错误
+    ///
+    /// ## 参数说明
+    /// - `msg`: 错误消息，描述内部错误的具体情况
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// return Err(AppError::internal("Database connection failed"));
+    /// ```
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::InternalServerError(msg.into())
     }
