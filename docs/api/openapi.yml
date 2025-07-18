@@ -71,6 +71,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelListResponse'
 
+  /models/refresh:
+    post:
+      summary: Refresh models from providers
+      description: Refreshes the model list by fetching the latest models from all configured providers
+      operationId: refreshModels
+      tags:
+        - Models
+      responses:
+        '200':
+          description: Models refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     ChatCompletionRequest:
@@ -212,6 +233,33 @@ components:
           type: string
           description: Organization that owns the model
           example: "google"
+
+    RefreshResponse:
+      type: object
+      required:
+        - status
+        - message
+        - timestamp
+      properties:
+        status:
+          type: string
+          example: "success"
+        message:
+          type: string
+          example: "Models refreshed successfully"
+        provider_stats:
+          type: object
+          description: Statistics about models per provider
+          additionalProperties:
+            type: integer
+          example:
+            openai: 5
+            gemini: 3
+            anthropic: 4
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the refresh was completed
 
     ErrorResponse:
       type: object

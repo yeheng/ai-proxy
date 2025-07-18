@@ -24,6 +24,36 @@ impl AnthropicProvider {
     pub fn new(config: ProviderDetail, client: Client) -> Self {
         Self { config, client }
     }
+
+    /// Fetch models from Anthropic API (currently returns configured models as Anthropic doesn't have a public models endpoint)
+    async fn fetch_models_from_api(&self) -> Result<Vec<ModelInfo>, AppError> {
+        // Note: Anthropic doesn't currently provide a public models endpoint
+        // So we return the configured models or default models
+        let models = self
+            .config
+            .models
+            .as_ref()
+            .map(|m| m.clone())
+            .unwrap_or_else(|| {
+                vec![
+                    "claude-3-5-sonnet-20241022".to_string(),
+                    "claude-3-5-haiku-20241022".to_string(),
+                    "claude-3-opus-20240229".to_string(),
+                    "claude-3-sonnet-20240229".to_string(),
+                    "claude-3-haiku-20240307".to_string(),
+                ]
+            });
+
+        Ok(models
+            .into_iter()
+            .map(|model| ModelInfo {
+                id: model,
+                object: "model".to_string(),
+                created: 1714560000, // Static timestamp for now
+                owned_by: "anthropic".to_string(),
+            })
+            .collect())
+    }
 }
 
 #[async_trait]
@@ -81,28 +111,8 @@ impl AIProvider for AnthropicProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
-        let models = self
-            .config
-            .models
-            .as_ref()
-            .map(|m| m.clone())
-            .unwrap_or_else(|| {
-                vec![
-                    "claude-3-opus-20240229".to_string(),
-                    "claude-3-sonnet-20240229".to_string(),
-                    "claude-3-haiku-20240307".to_string(),
-                ]
-            });
-
-        Ok(models
-            .into_iter()
-            .map(|model| ModelInfo {
-                id: model,
-                object: "model".to_string(),
-                created: 1714560000, // Static timestamp for now
-                owned_by: "anthropic".to_string(),
-            })
-            .collect())
+        // Use the fetch_models_from_api method for consistency
+        self.fetch_models_from_api().await
     }
 
     async fn health_check(&self) -> Result<HealthStatus, AppError> {

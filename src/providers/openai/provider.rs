@@ -17,6 +17,65 @@ impl OpenAIProvider {
     pub fn new(config: ProviderDetail, client: Client) -> Self {
         Self { config, client }
     }
+
+    /// Fetch models from OpenAI API
+    async fn fetch_models_from_api(&self) -> Result<Vec<ModelInfo>, AppError> {
+        let url = format!("{}models", self.config.api_base);
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .send()
+            .await
+            .map_err(|e| AppError::ProviderError {
+                status: 500,
+                message: format!("Failed to fetch models from OpenAI: {}", e),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let error_body = response.text().await.unwrap_or_default();
+            return Err(AppError::ProviderError {
+                status,
+                message: format!("OpenAI models API error: {}", error_body),
+            });
+        }
+
+        let models_response: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| AppError::ProviderError {
+                status: 500,
+                message: format!("Failed to parse OpenAI models response: {}", e),
+            })?;
+
+        // Parse the models from OpenAI's response format
+        let models = models_response
+            .get("data")
+            .and_then(|data| data.as_array())
+            .ok_or_else(|| AppError::ProviderError {
+                status: 500,
+                message: "Invalid models response format from OpenAI".to_string(),
+            })?
+            .iter()
+            .filter_map(|model| {
+                let id = model.get("id")?.as_str()?.to_string();
+                let object = model.get("object")?.as_str().unwrap_or("model").to_string();
+                let created = model.get("created")?.as_u64().unwrap_or(1714560000);
+                let owned_by = model.get("owned_by")?.as_str().unwrap_or("openai").to_string();
+
+                Some(ModelInfo {
+                    id,
+                    object,
+                    created,
+                    owned_by,
+                })
+            })
+            .collect();
+
+        Ok(models)
+    }
 }
 
 impl OpenAIProvider {
@@ -121,29 +180,40 @@ impl AIProvider for OpenAIProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
-        let models = self
-            .config
-            .models
-            .as_ref()
-            .map(|m| m.clone())
-            .unwrap_or_else(|| {
-                vec![
-                    "gpt-4".to_string(),
-                    "gpt-4-turbo-preview".to_string(),
-                    "gpt-3.5-turbo".to_string(),
-                    "gpt-3.5-turbo-16k".to_string(),
-                ]
-            });
+        // Try to fetch models from OpenAI API first
+        match self.fetch_models_from_api().await {
+            Ok(models) => {
+                tracing::info!("Successfully fetched {} models from OpenAI API", models.len());
+                Ok(models)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to fetch models from OpenAI API: {}, falling back to configured models", e);
+                // Fall back to configured models
+                let models = self
+                    .config
+                    .models
+                    .as_ref()
+                    .map(|m| m.clone())
+                    .unwrap_or_else(|| {
+                        vec![
+                            "gpt-4".to_string(),
+                            "gpt-4-turbo-preview".to_string(),
+                            "gpt-3.5-turbo".to_string(),
+                            "gpt-3.5-turbo-16k".to_string(),
+                        ]
+                    });
 
-        Ok(models
-            .into_iter()
-            .map(|model| ModelInfo {
-                id: model,
-                object: "model".to_string(),
-                created: 1714560000, // Static timestamp for now
-                owned_by: "openai".to_string(),
-            })
-            .collect())
+                Ok(models
+                    .into_iter()
+                    .map(|model| ModelInfo {
+                        id: model,
+                        object: "model".to_string(),
+                        created: 1714560000, // Static timestamp for now
+                        owned_by: "openai".to_string(),
+                    })
+                    .collect())
+            }
+        }
     }
 
     async fn health_check(&self) -> Result<HealthStatus, AppError> {

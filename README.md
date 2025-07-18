@@ -58,7 +58,27 @@ curl -X POST http://localhost:3000/v1/messages \
     "max_tokens": 100,
     "stream": true
   }'
+
+# List available models
+curl http://localhost:3000/v1/models
+
+# Refresh models from providers
+curl -X POST http://localhost:3000/v1/models/refresh
+
+# Check system health
+curl http://localhost:3000/health
+
+# Check provider health
+curl http://localhost:3000/health/providers
 ```
+
+## 📡 API Endpoints
+
+- **POST** `/v1/messages` - Chat completion (streaming and non-streaming)
+- **GET** `/v1/models` - List available models from all providers
+- **POST** `/v1/models/refresh` - Refresh models by fetching latest from providers
+- **GET** `/health` - System health check
+- **GET** `/health/providers` - Provider health status
 
 ## 📋 Configuration
 

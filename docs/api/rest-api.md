@@ -232,6 +232,48 @@ All errors follow a consistent format:
 }
 ```
 
+### Refresh Models
+
+Refresh the model list by fetching the latest models from all configured providers.
+
+**Endpoint**: `POST /v1/models/refresh`
+
+#### Request
+
+**Headers**:
+
+```
+Authorization: Bearer YOUR_API_KEY
+```
+
+#### Response
+
+**Success Response (200)**:
+
+```json
+{
+  "status": "success",
+  "message": "Models refreshed successfully",
+  "provider_stats": {
+    "openai": 5,
+    "gemini": 3,
+    "anthropic": 4
+  },
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+**Error Response (500)**:
+
+```json
+{
+  "error": {
+    "message": "Failed to refresh models from some providers",
+    "type": "provider_error"
+  }
+}
+```
+
 ## Model Support
 
 ### Supported Models

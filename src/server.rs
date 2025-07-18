@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use axum::{
     extract::State,
     response::Json,
@@ -25,7 +26,7 @@ use crate::{
 pub struct AppState {
     pub config: Arc<Config>,
     pub http_client: Client,
-    pub provider_registry: Arc<ProviderRegistry>,
+    pub provider_registry: Arc<Mutex<ProviderRegistry>>,
 }
 
 impl AppState {
@@ -40,9 +41,9 @@ impl AppState {
             .map_err(|e| AppError::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
 
         // Create provider registry
-        let provider_registry = Arc::new(
+        let provider_registry = Arc::new(Mutex::new(
             ProviderRegistry::new(&config, http_client.clone())?
-        );
+        ));
 
         Ok(Self {
             config: Arc::new(config),
@@ -59,6 +60,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/v1/messages", post(chat_handler))
         // Model management endpoints
         .route("/v1/models", get(list_models_handler))
+        .route("/v1/models/refresh", post(refresh_models_handler))
         // Health check endpoints
         .route("/health", get(health_handler))
         .route("/health/providers", get(health_providers_handler))
@@ -94,6 +96,7 @@ pub async fn start_server(config: Config) -> AppResult<()> {
     tracing::info!("Available endpoints:");
     tracing::info!("  POST /v1/messages - Chat completion");
     tracing::info!("  GET  /v1/models - List available models");
+    tracing::info!("  POST /v1/models/refresh - Refresh models from providers");
     tracing::info!("  GET  /health - System health check");
     tracing::info!("  GET  /health/providers - Provider health check");
 
@@ -114,7 +117,10 @@ async fn chat_handler(
     tracing::info!("Processing chat request for model: {}", request.model);
 
     // Get provider for the requested model
-    let provider = state.provider_registry.get_provider_for_model(&request.model)?;
+    let provider = {
+        let registry = state.provider_registry.lock().await;
+        registry.get_provider_for_model(&request.model)?
+    };
 
     // Handle streaming vs non-streaming
     if request.stream.unwrap_or(false) {
@@ -137,7 +143,10 @@ async fn list_models_handler(
 ) -> AppResult<Json<Value>> {
     tracing::info!("Processing models list request");
 
-    let models = state.provider_registry.list_all_models().await?;
+    let models = {
+        let registry = state.provider_registry.lock().await;
+        registry.list_all_models().await?
+    };
     
     let response = json!({
         "object": "list",
@@ -148,11 +157,43 @@ async fn list_models_handler(
     Ok(Json(response))
 }
 
+/// Handle model refresh requests
+async fn refresh_models_handler(
+    State(state): State<AppState>,
+) -> AppResult<Json<Value>> {
+    tracing::info!("Processing models refresh request");
+
+    // Refresh models from all providers
+    {
+        let mut registry = state.provider_registry.lock().await;
+        registry.refresh_models().await?;
+    }
+
+    // Get updated model statistics
+    let stats = {
+        let registry = state.provider_registry.lock().await;
+        registry.get_model_stats()
+    };
+
+    let response = json!({
+        "status": "success",
+        "message": "Models refreshed successfully",
+        "provider_stats": stats,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+
+    tracing::info!("Models refresh completed successfully");
+    Ok(Json(response))
+}
+
 /// Handle system health check
 async fn health_handler(
     State(state): State<AppState>,
 ) -> AppResult<Json<Value>> {
-    let provider_count = state.provider_registry.get_provider_ids().len();
+    let provider_count = {
+        let registry = state.provider_registry.lock().await;
+        registry.get_provider_ids().len()
+    };
     
     let response = json!({
         "status": "healthy",
@@ -171,7 +212,10 @@ async fn health_providers_handler(
 ) -> AppResult<Json<Value>> {
     tracing::info!("Processing provider health check");
 
-    let health_results = state.provider_registry.health_check_all().await;
+    let health_results = {
+        let registry = state.provider_registry.lock().await;
+        registry.health_check_all().await
+    };
     
     let overall_status = if health_results.values().all(|h| h.status == "healthy") {
         "healthy"

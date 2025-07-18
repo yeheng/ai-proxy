@@ -141,6 +141,47 @@ impl ProviderRegistry {
         &self.model_mapping
     }
 
+    /// Refresh models from all providers and update the model mapping
+    ///
+    /// This method fetches the latest model lists from all configured providers
+    /// and updates the internal model mapping. This is useful for getting the
+    /// most up-to-date model information without restarting the service.
+    pub async fn refresh_models(&mut self) -> Result<(), AppError> {
+        let mut new_model_mapping: HashMap<String, String> = HashMap::new();
+
+        for (provider_id, provider) in &self.providers {
+            match provider.list_models().await {
+                Ok(models) => {
+                    for model in models {
+                        new_model_mapping.insert(model.id, provider_id.clone());
+                    }
+                    tracing::info!("Refreshed models for provider: {}", provider_id);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to refresh models for provider {}: {}", provider_id, e);
+                    // Continue with other providers instead of failing completely
+                }
+            }
+        }
+
+        // Update the model mapping
+        self.model_mapping = new_model_mapping;
+        tracing::info!("Model mapping refreshed successfully");
+
+        Ok(())
+    }
+
+    /// Get statistics about the current model mapping
+    pub fn get_model_stats(&self) -> HashMap<String, usize> {
+        let mut stats = HashMap::new();
+
+        for provider_id in self.model_mapping.values() {
+            *stats.entry(provider_id.clone()).or_insert(0) += 1;
+        }
+
+        stats
+    }
+
     /// Get default models for a provider type
     fn get_default_models(provider_id: &str) -> Vec<String> {
         match provider_id {

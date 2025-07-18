@@ -17,6 +17,70 @@ impl GeminiProvider {
     pub fn new(config: ProviderDetail, client: Client) -> Self {
         Self { config, client }
     }
+
+    /// Fetch models from Gemini API
+    async fn fetch_models_from_api(&self) -> Result<Vec<ModelInfo>, AppError> {
+        let url = format!(
+            "{}models?key={}",
+            self.config
+                .api_base
+                .trim_end_matches('/')
+                .replace("/v1beta/models", "/v1beta"),
+            self.config.api_key
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| AppError::ProviderError {
+                status: 500,
+                message: format!("Failed to fetch models from Gemini: {}", e),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let error_body = response.text().await.unwrap_or_default();
+            return Err(AppError::ProviderError {
+                status,
+                message: format!("Gemini models API error: {}", error_body),
+            });
+        }
+
+        let models_response: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| AppError::ProviderError {
+                status: 500,
+                message: format!("Failed to parse Gemini models response: {}", e),
+            })?;
+
+        // Parse the models from Gemini's response format
+        let models = models_response
+            .get("models")
+            .and_then(|models| models.as_array())
+            .ok_or_else(|| AppError::ProviderError {
+                status: 500,
+                message: "Invalid models response format from Gemini".to_string(),
+            })?
+            .iter()
+            .filter_map(|model| {
+                let name = model.get("name")?.as_str()?;
+                // Extract model ID from the full name (e.g., "models/gemini-pro" -> "gemini-pro")
+                let id = name.strip_prefix("models/").unwrap_or(name).to_string();
+
+                Some(ModelInfo {
+                    id,
+                    object: "model".to_string(),
+                    created: 1714560000, // Static timestamp for now
+                    owned_by: "google".to_string(),
+                })
+            })
+            .collect();
+
+        Ok(models)
+    }
 }
 
 impl GeminiProvider {
@@ -155,28 +219,39 @@ impl AIProvider for GeminiProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
-        let models = self
-            .config
-            .models
-            .as_ref()
-            .map(|m| m.clone())
-            .unwrap_or_else(|| {
-                vec![
-                    "gemini-1.5-pro-latest".to_string(),
-                    "gemini-1.5-flash-latest".to_string(),
-                    "gemini-pro".to_string(),
-                ]
-            });
+        // Try to fetch models from Gemini API first
+        match self.fetch_models_from_api().await {
+            Ok(models) => {
+                tracing::info!("Successfully fetched {} models from Gemini API", models.len());
+                Ok(models)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to fetch models from Gemini API: {}, falling back to configured models", e);
+                // Fall back to configured models
+                let models = self
+                    .config
+                    .models
+                    .as_ref()
+                    .map(|m| m.clone())
+                    .unwrap_or_else(|| {
+                        vec![
+                            "gemini-1.5-pro-latest".to_string(),
+                            "gemini-1.5-flash-latest".to_string(),
+                            "gemini-pro".to_string(),
+                        ]
+                    });
 
-        Ok(models
-            .into_iter()
-            .map(|model| ModelInfo {
-                id: model,
-                object: "model".to_string(),
-                created: 1714560000, // Static timestamp for now
-                owned_by: "google".to_string(),
-            })
-            .collect())
+                Ok(models
+                    .into_iter()
+                    .map(|model| ModelInfo {
+                        id: model,
+                        object: "model".to_string(),
+                        created: 1714560000, // Static timestamp for now
+                        owned_by: "google".to_string(),
+                    })
+                    .collect())
+            }
+        }
     }
 
     async fn health_check(&self) -> Result<HealthStatus, AppError> {
