@@ -186,8 +186,9 @@ fn test_request_validation_conversation_must_start_with_user() {
         stream: None,
     };
     let result = request.validate();
+
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Conversation must start with a user message"));
+    assert!(result.unwrap_err().to_string().contains("Invalid role sequence at message 0: expected 'user', got 'assistant'"));
 }
 
 #[test]
@@ -311,7 +312,6 @@ fn test_request_validation_content_too_long() {
         stream: None,
     };
     let result = request.validate();
-    print!("{:?}", result);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Message content too long"));
 }

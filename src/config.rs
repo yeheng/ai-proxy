@@ -3,14 +3,22 @@ use figment::{Figment, providers::{Format, Toml, Env}};
 use std::collections::HashMap;
 use anyhow::{Context, Result};
 
+/// 主配置结构体
+/// 
+/// 包含AI代理服务的所有配置信息，从配置文件和环境变量加载
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
+    /// 服务器配置
     pub server: ServerConfig,
+    /// AI提供商配置映射（提供商ID -> 提供商详情）
     pub providers: HashMap<String, ProviderDetail>,
+    /// 日志配置（可选，有默认值）
     #[serde(default)]
     pub logging: LoggingConfig,
+    /// 安全配置（可选，有默认值）
     #[serde(default)]
     pub security: SecurityConfig,
+    /// 性能配置（可选，有默认值）
     #[serde(default)]
     pub performance: PerformanceConfig,
 }

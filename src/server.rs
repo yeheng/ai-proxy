@@ -18,14 +18,17 @@ use crate::{
     providers::{ProviderRegistry, anthropic::AnthropicRequest},
 };
 
-/// Application state shared across all request handlers
+/// 应用程序状态 - 在所有请求处理器之间共享
 /// 
-/// Contains all the shared resources needed by request handlers,
-/// including configuration, HTTP client, and provider registry.
+/// 包含请求处理器所需的所有共享资源，
+/// 包括配置、HTTP客户端和提供商注册表
 #[derive(Clone)]
 pub struct AppState {
+    /// 应用程序配置（只读共享）
     pub config: Arc<Config>,
+    /// HTTP客户端，用于与AI提供商通信
     pub http_client: Client,
+    /// 提供商注册表，管理所有AI提供商
     pub provider_registry: Arc<Mutex<ProviderRegistry>>,
 }
 

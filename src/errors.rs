@@ -6,10 +6,12 @@ use axum::{
 use serde_json::json;
 use thiserror::Error;
 
-// Use anyhow::Result for internal error handling
-// Use thiserror for well-typed errors that need to be handled specifically
+// 使用anyhow::Result进行内部错误处理
+// 使用thiserror定义需要特殊处理的类型化错误
 
-/// Application-specific errors that need special handling
+/// 应用程序特定的错误类型，需要特殊处理
+/// 
+/// 这些错误类型提供了详细的错误信息，并映射到适当的HTTP状态码
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("Bad request: {0}")]

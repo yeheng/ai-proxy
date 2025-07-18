@@ -110,8 +110,10 @@ impl AIProvider for GeminiProvider {
 
         // Build URL
         let url = format!(
-            "{}{}:generateContent?key={}",
-            self.config.api_base, request.model, self.config.api_key
+            "{}/{}:generateContent?key={}",
+            self.config.api_base.trim_end_matches('/'),
+            request.model,
+            self.config.api_key
         );
 
         // Send request
@@ -132,7 +134,7 @@ impl AIProvider for GeminiProvider {
             let error_body = response.text().await.unwrap_or_default();
             return Err(AppError::ProviderError {
                 status,
-                message: format!("Gemini API error: {}", error_body),
+                message: format!("Gemini API error: {}", error_body.replace("Gemini API error: ", "")),
             });
         }
 

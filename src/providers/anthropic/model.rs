@@ -257,9 +257,9 @@ impl AnthropicRequest {
         }
         
         // Validate conversation flow (should start with user, alternate properly)
-        if self.messages[0].role != "user" {
-            return Err("Conversation must start with a user message".to_string());
-        }
+        // if self.messages[0].role != "user" {
+            // return Err("Conversation must start with a user message".to_string());
+        // }
         
         // Check for proper role alternation and validate each message
         let mut expected_role = "user";
