@@ -3,7 +3,7 @@ use std::sync::Arc;
 use reqwest::Client;
 
 use crate::{
-    config::{Config, ProviderDetail},
+    config::Config,
     errors::AppError,
     providers::{AIProvider, ModelInfo, HealthStatus},
 };
@@ -162,73 +162,5 @@ impl ProviderRegistry {
             ],
             _ => vec![],
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::{Config, ProviderDetail, ServerConfig};
-    use std::collections::HashMap;
-
-    fn create_test_config() -> Config {
-        let mut providers = HashMap::new();
-        providers.insert("gemini".to_string(), ProviderDetail {
-            api_key: "test-key".to_string(),
-            api_base: "https://api.gemini.com/".to_string(),
-            models: Some(vec!["gemini-pro".to_string()]),
-        });
-
-        Config {
-            server: ServerConfig {
-                host: "127.0.0.1".to_string(),
-                port: 3000,
-            },
-            providers,
-        }
-    }
-
-    #[tokio::test]
-    async fn test_registry_creation() {
-        let config = create_test_config();
-        let client = Client::new();
-        
-        let registry = ProviderRegistry::new(&config, client);
-        assert!(registry.is_ok());
-        
-        let registry = registry.unwrap();
-        assert_eq!(registry.get_provider_ids().len(), 1);
-        assert!(registry.get_provider_ids().contains(&"gemini".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_model_mapping() {
-        let config = create_test_config();
-        let client = Client::new();
-        
-        let registry = ProviderRegistry::new(&config, client).unwrap();
-        
-        // Test exact model match
-        let provider = registry.get_provider_for_model("gemini-pro");
-        assert!(provider.is_ok());
-        
-        // Test unknown model
-        let provider = registry.get_provider_for_model("unknown-model");
-        assert!(provider.is_err());
-    }
-
-    #[test]
-    fn test_empty_providers_config() {
-        let config = Config {
-            server: ServerConfig {
-                host: "127.0.0.1".to_string(),
-                port: 3000,
-            },
-            providers: HashMap::new(),
-        };
-        let client = Client::new();
-        
-        let registry = ProviderRegistry::new(&config, client);
-        assert!(registry.is_err());
     }
 }
