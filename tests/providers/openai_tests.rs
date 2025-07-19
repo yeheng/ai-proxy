@@ -152,6 +152,7 @@ async fn test_openai_chat_api_error() {
 
     // Verify error handling
     assert!(result.is_err());
+    println!("Error: {:?}", result);
     match result.unwrap_err() {
         AppError::ProviderError { status, message } => {
             assert_eq!(status, 401);

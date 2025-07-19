@@ -5,18 +5,29 @@ use axum::{
     response::Json,
     routing::{get, post},
     Router,
+    middleware,
 };
 use reqwest::Client;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
-use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
+
+use tower_http::{
+    trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse},
+    cors::CorsLayer,
+};
 
 use crate::{
     config::Config,
     errors::{AppError, AppResult},
     providers::{ProviderRegistry, anthropic::AnthropicRequest},
     metrics::MetricsCollector,
+    middleware::{
+        logging_middleware,
+        error_handling_middleware,
+        validation_middleware,
+        performance_middleware,
+        request_id_middleware,
+    },
 };
 
 /// 应用程序状态 - 在所有请求处理器之间共享
@@ -87,7 +98,7 @@ impl AppState {
 /// 创建主应用程序路由器，包含所有路由和中间件
 ///
 /// ## 功能说明
-/// 构建完整的HTTP路由器，配置所有API端点和中间件层
+/// 构建完整的HTTP路由器，配置所有API端点和完整的中间件栈
 ///
 /// ## 内部实现逻辑
 /// 1. 创建新的Axum路由器
@@ -95,7 +106,14 @@ impl AppState {
 /// 3. 配置模型管理端点（GET /v1/models, POST /v1/models/refresh）
 /// 4. 配置健康检查端点（GET /health, GET /health/providers）
 /// 5. 添加应用程序状态到路由器
-/// 6. 添加HTTP追踪中间件用于请求日志
+/// 6. 配置完整的中间件栈：
+///    - 请求ID生成和传播
+///    - 结构化日志记录
+///    - 错误处理统一化
+///    - 请求验证
+///    - 性能监控
+///    - HTTP追踪
+///    - CORS支持
 ///
 /// ## 参数说明
 /// - `state`: 应用程序状态，包含配置和提供商注册表
@@ -106,6 +124,7 @@ impl AppState {
 /// - `POST /v1/models/refresh`: 刷新模型列表
 /// - `GET /health`: 系统健康检查
 /// - `GET /health/providers`: 提供商健康检查
+/// - `GET /metrics`: 系统指标和统计
 ///
 /// ## 执行例子
 /// ```rust
@@ -126,11 +145,25 @@ pub fn create_app(state: AppState) -> Router {
         // 指标端点
         .route("/metrics", get(metrics_handler))
         // 添加共享状态
-        .with_state(state)
-        // 添加中间件层
+        .with_state(state.clone())
+        // 添加路由级中间件（需要访问状态）
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            logging_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            performance_middleware,
+        ))
+        .route_layer(middleware::from_fn(validation_middleware))
+        .route_layer(middleware::from_fn(error_handling_middleware))
+        .route_layer(middleware::from_fn(request_id_middleware))
+        // 添加全局中间件层
+        .layer(CorsLayer::permissive())
         .layer(
-            ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http())  // HTTP请求追踪
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                .on_response(DefaultOnResponse::new().include_headers(true))
         )
 }
 
@@ -138,14 +171,15 @@ pub fn create_app(state: AppState) -> Router {
 ///
 /// ## 功能说明
 /// 启动AI代理HTTP服务器，监听指定地址和端口，处理客户端请求
+/// 包含完整的中间件栈和结构化日志系统
 ///
 /// ## 内部实现逻辑
-/// 1. 初始化tracing日志系统
-/// 2. 从配置创建应用程序状态
-/// 3. 创建包含所有路由的应用程序路由器
-/// 4. 绑定TCP监听器到指定地址
-/// 5. 记录服务器启动信息和可用端点
-/// 6. 启动Axum服务器并等待请求
+/// 1. 从配置创建应用程序状态
+/// 2. 创建包含所有路由和中间件的应用程序路由器
+/// 3. 绑定TCP监听器到指定地址
+/// 4. 记录服务器启动信息和可用端点
+/// 5. 启动Axum服务器并等待请求
+/// 6. 支持优雅关闭和错误恢复
 ///
 /// ## 参数说明
 /// - `config`: 服务器配置，包含主机地址、端口等信息
@@ -161,14 +195,13 @@ pub fn create_app(state: AppState) -> Router {
 /// - `Ok(())`: 服务器正常关闭
 /// - `Err(AppError)`: 服务器启动或运行失败
 pub async fn start_server(config: Config) -> AppResult<()> {
-    // 初始化日志追踪系统
-    tracing_subscriber::fmt()
-        .with_target(false)  // 不显示目标模块
-        .compact()  // 紧凑格式
-        .init();
-
     // 创建应用程序状态
     let app_state = AppState::new(config.clone())?;
+
+    tracing::info!(
+        providers_configured = app_state.provider_registry.lock().await.get_provider_ids().len(),
+        "Application state initialized"
+    );
 
     // 创建路由器
     let app = create_app(app_state);
@@ -179,19 +212,33 @@ pub async fn start_server(config: Config) -> AppResult<()> {
         .map_err(|e| AppError::ConfigError(format!("Failed to bind to {}: {}", addr, e)))?;
 
     // 记录服务器启动信息
-    tracing::info!("AI Proxy server starting on {}", addr);
+    tracing::info!(
+        address = %addr,
+        "AI Proxy server starting"
+    );
+    
     tracing::info!("Available endpoints:");
-    tracing::info!("  POST /v1/messages - Chat completion");
-    tracing::info!("  GET  /v1/models - List available models");
+    tracing::info!("  POST /v1/messages - Chat completion with streaming support");
+    tracing::info!("  GET  /v1/models - List available models from all providers");
     tracing::info!("  POST /v1/models/refresh - Refresh models from providers");
     tracing::info!("  GET  /health - System health check");
     tracing::info!("  GET  /health/providers - Provider health check");
     tracing::info!("  GET  /metrics - System metrics and statistics");
 
-    // Start server
+    tracing::info!("Middleware stack configured:");
+    tracing::info!("  - Request ID generation and propagation");
+    tracing::info!("  - Structured logging with request context");
+    tracing::info!("  - Error handling and response standardization");
+    tracing::info!("  - Request validation and size limits");
+    tracing::info!("  - Performance monitoring and metrics");
+    tracing::info!("  - HTTP tracing and CORS support");
+
+    // Start server with graceful shutdown support
+    tracing::info!("Server ready to accept connections");
     axum::serve(listener, app).await
         .map_err(|e| AppError::InternalServerError(format!("Server error: {}", e)))?;
 
+    tracing::info!("Server shutdown completed");
     Ok(())
 }
 

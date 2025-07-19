@@ -39,7 +39,7 @@ impl OpenAIProvider {
 
     /// Fetch models from OpenAI API
     async fn fetch_models_from_api(&self) -> Result<Vec<ModelInfo>, AppError> {
-        let url = format!("{}models", self.config.api_base.trim_end_matches('/'));
+        let url = format!("{}/models", self.config.api_base.trim_end_matches('/'));
 
         tracing::info!("Fetching models from URL: {}", url);
 
@@ -170,7 +170,7 @@ impl AIProvider for OpenAIProvider {
         openai_req.validate()?;
 
         // Build URL
-        let url = format!("{}chat/completions", self.config.api_base.trim_end_matches('/'));
+        let url = format!("{}/chat/completions", self.config.api_base.trim_end_matches('/'));
 
         tracing::info!("Sending OpenAI chat request to: {} with model: {}", url, request.model);
 
@@ -247,7 +247,7 @@ impl AIProvider for OpenAIProvider {
         openai_req.validate()?;
 
         // Build streaming URL
-        let url = format!("{}chat/completions", self.config.api_base.trim_end_matches('/'));
+        let url = format!("{}/chat/completions", self.config.api_base.trim_end_matches('/'));
 
         tracing::info!("Starting OpenAI streaming request to: {} with model: {}", url, request.model);
 
@@ -521,7 +521,7 @@ impl OpenAIProvider {
     /// Perform comprehensive health check
     async fn perform_comprehensive_health_check(&self) -> Result<(), AppError> {
         // First, try to list models (lightweight check)
-        let models_url = format!("{}models", self.config.api_base.trim_end_matches('/'));
+        let models_url = format!("{}/models", self.config.api_base.trim_end_matches('/'));
         
         let models_response = self
             .client
@@ -561,7 +561,7 @@ impl OpenAIProvider {
             1
         );
 
-        let chat_url = format!("{}chat/completions", self.config.api_base.trim_end_matches('/'));
+        let chat_url = format!("{}/chat/completions", self.config.api_base.trim_end_matches('/'));
         let chat_response = self
             .client
             .post(&chat_url)

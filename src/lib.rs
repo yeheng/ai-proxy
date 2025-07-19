@@ -8,6 +8,7 @@ pub mod errors;      // 错误处理模块
 pub mod providers;   // AI提供商模块
 pub mod server;      // HTTP服务器模块
 pub mod metrics;     // 指标收集模块
+pub mod middleware;  // 中间件模块
 
 // 重新导出常用类型，方便外部使用
 pub use config::{Config, load_config};

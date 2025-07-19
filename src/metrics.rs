@@ -7,7 +7,7 @@ use serde::Serialize;
 
 /// 系统指标收集器
 /// 
-/// 负责收集和管理系统运行时的各种指标，包括请求计数、延迟、错误率等
+/// 负责收集和管理系统运行时的各种指标，包括请求计数、延迟、错误率、并发请求等
 #[derive(Debug, Clone)]
 pub struct MetricsCollector {
     /// 请求计数器
@@ -16,6 +16,10 @@ pub struct MetricsCollector {
     success_count: Arc<AtomicU64>,
     /// 错误请求计数器
     error_count: Arc<AtomicU64>,
+    /// 当前并发请求数
+    concurrent_requests: Arc<AtomicU64>,
+    /// 最大并发请求数
+    max_concurrent_requests: Arc<AtomicU64>,
     /// 延迟统计信息
     latency_stats: Arc<RwLock<LatencyStats>>,
     /// 按提供商分组的指标
@@ -84,6 +88,10 @@ pub struct MetricsSummary {
     pub error_rate_percent: f64,
     /// 平均延迟（毫秒）
     pub avg_latency_ms: f64,
+    /// 当前并发请求数
+    pub current_concurrent_requests: u64,
+    /// 最大并发请求数
+    pub max_concurrent_requests: u64,
     /// 延迟统计
     pub latency_stats: LatencyStats,
     /// 按提供商分组的指标
@@ -143,11 +151,69 @@ impl MetricsCollector {
             request_count: Arc::new(AtomicU64::new(0)),
             success_count: Arc::new(AtomicU64::new(0)),
             error_count: Arc::new(AtomicU64::new(0)),
+            concurrent_requests: Arc::new(AtomicU64::new(0)),
+            max_concurrent_requests: Arc::new(AtomicU64::new(0)),
             latency_stats: Arc::new(RwLock::new(LatencyStats::default())),
             provider_metrics: Arc::new(RwLock::new(HashMap::new())),
             model_metrics: Arc::new(RwLock::new(HashMap::new())),
             start_time: Instant::now(),
         }
+    }
+
+    /// 增加并发请求计数
+    ///
+    /// ## 功能说明
+    /// 增加当前并发请求数，并更新最大并发请求数记录
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// metrics.increment_concurrent_requests().await;
+    /// ```
+    pub async fn increment_concurrent_requests(&self) {
+        let current = self.concurrent_requests.fetch_add(1, Ordering::Relaxed) + 1;
+        
+        // 更新最大并发请求数
+        let mut max = self.max_concurrent_requests.load(Ordering::Relaxed);
+        while current > max {
+            match self.max_concurrent_requests.compare_exchange_weak(
+                max,
+                current,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(x) => max = x,
+            }
+        }
+    }
+
+    /// 减少并发请求计数
+    ///
+    /// ## 功能说明
+    /// 减少当前并发请求数，通常在请求完成时调用
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// metrics.decrement_concurrent_requests().await;
+    /// ```
+    pub async fn decrement_concurrent_requests(&self) {
+        self.concurrent_requests.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    /// 获取当前并发请求数
+    ///
+    /// ## 功能说明
+    /// 返回当前正在处理的并发请求数量
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// let concurrent = metrics.get_concurrent_requests();
+    /// ```
+    ///
+    /// ## 返回值
+    /// - `u64`: 当前并发请求数
+    pub fn get_concurrent_requests(&self) -> u64 {
+        self.concurrent_requests.load(Ordering::Relaxed)
     }
 
     /// 记录请求开始
@@ -288,6 +354,8 @@ impl MetricsCollector {
             success_rate_percent,
             error_rate_percent,
             avg_latency_ms,
+            current_concurrent_requests: self.concurrent_requests.load(Ordering::Relaxed),
+            max_concurrent_requests: self.max_concurrent_requests.load(Ordering::Relaxed),
             latency_stats,
             provider_metrics,
             model_metrics,
@@ -308,6 +376,8 @@ impl MetricsCollector {
         self.request_count.store(0, Ordering::Relaxed);
         self.success_count.store(0, Ordering::Relaxed);
         self.error_count.store(0, Ordering::Relaxed);
+        self.concurrent_requests.store(0, Ordering::Relaxed);
+        self.max_concurrent_requests.store(0, Ordering::Relaxed);
         
         *self.latency_stats.write().await = LatencyStats::default();
         self.provider_metrics.write().await.clear();
