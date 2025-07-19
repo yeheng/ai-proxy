@@ -94,20 +94,20 @@
   - 添加 OpenAI 特定的错误处理
   - _需求: 7.1, 7.2, 8.2_
 
-- [ ] 6. 实现 Anthropic 提供商适配器
-- [ ] 6.1 创建 Anthropic 原生提供商实现
+- [x] 6. 实现 Anthropic 提供商适配器
+- [x] 6.1 创建 Anthropic 原生提供商实现
   - 创建 AnthropicProvider 结构体实现 AIProvider trait
   - 实现直接的 API 调用（无需格式转换）
   - 添加 Anthropic API 特定的认证和错误处理
   - _需求: 1.1, 1.3, 2.1, 5.3_
 
-- [ ] 6.2 实现 Anthropic 流式聊天功能
+- [x] 6.2 实现 Anthropic 流式聊天功能
   - 实现 chat_stream 方法处理流式请求
   - 直接转发 Anthropic 的原生流式响应
   - 确保流式响应格式的一致性
   - _需求: 3.1, 3.2, 3.3_
 
-- [ ] 6.3 添加 Anthropic 模型列表和健康检查
+- [x] 6.3 添加 Anthropic 模型列表和健康检查
   - 实现 list_models 方法返回可用模型
   - 实现 health_check 方法验证提供商连通性
   - 添加完整的错误处理和重试逻辑
