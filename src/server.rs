@@ -194,7 +194,11 @@ pub async fn start_server(config: Config) -> AppResult<()> {
 async fn chat_handler(
     State(state): State<AppState>,
     Json(request): Json<AnthropicRequest>,
-) -> AppResult<Json<Value>> {
+) -> AppResult<axum::response::Response> {
+    use axum::response::{Response, IntoResponse};
+    use axum::body::Body;
+    use futures::StreamExt;
+    
     tracing::info!("Processing chat request for model: {}", request.model);
 
     // Get provider for the requested model
@@ -205,17 +209,34 @@ async fn chat_handler(
 
     // Handle streaming vs non-streaming
     if request.stream.unwrap_or(false) {
-        // TODO: Implement streaming response
-        return Err(AppError::InternalServerError(
-            "Streaming responses not yet implemented".to_string()
-        ));
+        tracing::info!("Processing streaming chat request");
+        
+        // Get streaming response
+        let stream = provider.chat_stream(request).await?;
+        
+        // Convert stream to HTTP response body
+        let body = Body::from_stream(stream);
+        
+        // Create SSE response
+        let response = Response::builder()
+            .status(200)
+            .header("Content-Type", "text/event-stream")
+            .header("Cache-Control", "no-cache")
+            .header("Connection", "keep-alive")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Headers", "Content-Type")
+            .body(body)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to create streaming response: {}", e)))?;
+            
+        tracing::info!("Streaming chat request initialized successfully");
+        Ok(response)
+    } else {
+        // Process non-streaming request
+        let response = provider.chat(request).await?;
+        
+        tracing::info!("Chat request completed successfully");
+        Ok(Json(serde_json::to_value(response).unwrap()).into_response())
     }
-
-    // Process non-streaming request
-    let response = provider.chat(request).await?;
-    
-    tracing::info!("Chat request completed successfully");
-    Ok(Json(serde_json::to_value(response).unwrap()))
 }
 
 /// Handle model listing requests

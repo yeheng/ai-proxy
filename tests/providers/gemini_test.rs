@@ -590,3 +590,280 @@ async fn test_gemini_provider_chat_network_error() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_gemini_provider_list_models_success() {
+    // Start a mock server
+    let mock_server = MockServer::start().await;
+
+    // Mock the Gemini models API response
+    Mock::given(method("GET"))
+        .and(path_regex(r".*/models"))
+        .and(query_param("key", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "models": [
+                {
+                    "name": "models/gemini-1.5-pro-latest",
+                    "displayName": "Gemini 1.5 Pro Latest",
+                    "description": "The latest version of Gemini 1.5 Pro"
+                },
+                {
+                    "name": "models/gemini-1.5-flash-latest",
+                    "displayName": "Gemini 1.5 Flash Latest",
+                    "description": "The latest version of Gemini 1.5 Flash"
+                },
+                {
+                    "name": "models/gemini-pro",
+                    "displayName": "Gemini Pro",
+                    "description": "Gemini Pro model"
+                }
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Create provider configuration
+    let config = ProviderDetail {
+        api_key: "test-api-key".to_string(),
+        api_base: format!("{}/v1beta/", mock_server.uri()),
+        models: Some(vec![
+            "gemini-1.5-pro-latest".to_string(),
+            "gemini-1.5-flash-latest".to_string(),
+            "gemini-pro".to_string(),
+        ]),
+        enabled: true,
+        max_retries: 3,
+        rate_limit: None,
+        timeout_seconds: 60,
+    };
+
+    // Create provider instance
+    let client = Client::new();
+    let provider = GeminiProvider::new(config, client);
+
+    // Test the list_models method
+    let models = provider.list_models().await.unwrap();
+
+
+
+    // Verify response
+    assert_eq!(models.len(), 3);
+    assert_eq!(models[0].id, "gemini-1.5-pro-latest");
+    assert_eq!(models[0].object, "model");
+    assert_eq!(models[0].owned_by, "google");
+    assert_eq!(models[1].id, "gemini-1.5-flash-latest");
+    assert_eq!(models[2].id, "gemini-pro");
+}
+
+#[tokio::test]
+async fn test_gemini_provider_list_models_api_error_fallback() {
+    // Start a mock server
+    let mock_server = MockServer::start().await;
+
+    // Mock an API error response
+    Mock::given(method("GET"))
+        .and(path_regex(r".*/models"))
+        .and(query_param("key", "test-api-key"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "error": {
+                "code": 401,
+                "message": "Invalid API key"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Create provider configuration with fallback models
+    let config = ProviderDetail {
+        api_key: "test-api-key".to_string(),
+        api_base: format!("{}/v1beta/", mock_server.uri()),
+        models: Some(vec![
+            "gemini-1.5-pro-latest".to_string(),
+            "gemini-1.5-flash-latest".to_string(),
+            "gemini-pro".to_string(),
+        ]),
+        enabled: true,
+        max_retries: 3,
+        rate_limit: None,
+        timeout_seconds: 60,
+    };
+
+    // Create provider instance
+    let client = Client::new();
+    let provider = GeminiProvider::new(config, client);
+
+    // Test the list_models method - should fall back to configured models
+    let models = provider.list_models().await.unwrap();
+
+    // Verify response uses fallback models
+    assert_eq!(models.len(), 3);
+    assert_eq!(models[0].id, "gemini-1.5-pro-latest");
+    assert_eq!(models[0].object, "model");
+    assert_eq!(models[0].owned_by, "google");
+    assert_eq!(models[1].id, "gemini-1.5-flash-latest");
+    assert_eq!(models[2].id, "gemini-pro");
+}
+
+#[tokio::test]
+async fn test_gemini_provider_list_models_no_config_fallback() {
+    // Start a mock server
+    let mock_server = MockServer::start().await;
+
+    // Mock an API error response
+    Mock::given(method("GET"))
+        .and(path_regex(r".*/models"))
+        .and(query_param("key", "test-api-key"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+            "error": {
+                "code": 500,
+                "message": "Internal server error"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Create provider configuration without models (should use default fallback)
+    let config = ProviderDetail {
+        api_key: "test-api-key".to_string(),
+        api_base: format!("{}/v1beta/", mock_server.uri()),
+        models: None, // No configured models
+        enabled: true,
+        max_retries: 3,
+        rate_limit: None,
+        timeout_seconds: 60,
+    };
+
+    // Create provider instance
+    let client = Client::new();
+    let provider = GeminiProvider::new(config, client);
+
+    // Test the list_models method - should use default fallback models
+    let models = provider.list_models().await.unwrap();
+
+    // Verify response uses default fallback models
+    assert_eq!(models.len(), 3);
+    assert_eq!(models[0].id, "gemini-1.5-pro-latest");
+    assert_eq!(models[1].id, "gemini-1.5-flash-latest");
+    assert_eq!(models[2].id, "gemini-pro");
+}
+
+#[tokio::test]
+async fn test_gemini_provider_health_check_success() {
+    // Start a mock server
+    let mock_server = MockServer::start().await;
+
+    // Mock the Gemini models API response for health check
+    Mock::given(method("GET"))
+        .and(path_regex(r".*/models"))
+        .and(query_param("key", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "models": [
+                {
+                    "name": "models/gemini-pro",
+                    "displayName": "Gemini Pro",
+                    "description": "Gemini Pro model"
+                }
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Create provider configuration
+    let config = ProviderDetail {
+        api_key: "test-api-key".to_string(),
+        api_base: format!("{}/v1beta/", mock_server.uri()),
+        models: Some(vec!["gemini-pro".to_string()]),
+        enabled: true,
+        max_retries: 3,
+        rate_limit: None,
+        timeout_seconds: 60,
+    };
+
+    // Create provider instance
+    let client = Client::new();
+    let provider = GeminiProvider::new(config, client);
+
+    // Test the health_check method
+    let health = provider.health_check().await.unwrap();
+
+    // Verify response
+    assert_eq!(health.status, "healthy");
+    assert_eq!(health.provider, "gemini");
+    assert!(health.latency_ms.is_some());
+    assert!(health.latency_ms.unwrap() > 0);
+    assert!(health.error.is_none());
+}
+
+#[tokio::test]
+async fn test_gemini_provider_health_check_api_error() {
+    // Start a mock server
+    let mock_server = MockServer::start().await;
+
+    // Mock an API error response
+    Mock::given(method("GET"))
+        .and(path_regex(r".*/models"))
+        .and(query_param("key", "test-api-key"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "error": {
+                "code": 401,
+                "message": "Invalid API key"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Create provider configuration
+    let config = ProviderDetail {
+        api_key: "test-api-key".to_string(),
+        api_base: format!("{}/v1beta/", mock_server.uri()),
+        models: Some(vec!["gemini-pro".to_string()]),
+        enabled: true,
+        max_retries: 3,
+        rate_limit: None,
+        timeout_seconds: 60,
+    };
+
+    // Create provider instance
+    let client = Client::new();
+    let provider = GeminiProvider::new(config, client);
+
+    // Test the health_check method
+    let health = provider.health_check().await.unwrap();
+
+    // Verify response indicates unhealthy status
+    assert_eq!(health.status, "unhealthy");
+    assert_eq!(health.provider, "gemini");
+    assert!(health.latency_ms.is_some());
+    assert!(health.error.is_some());
+    assert_eq!(health.error.unwrap(), "HTTP 401 Unauthorized");
+}
+
+#[tokio::test]
+async fn test_gemini_provider_health_check_network_error() {
+    // Create provider configuration with invalid URL
+    let config = ProviderDetail {
+        api_key: "test-api-key".to_string(),
+        api_base: "http://invalid-url-that-does-not-exist:9999/v1beta/".to_string(),
+        models: Some(vec!["gemini-pro".to_string()]),
+        enabled: true,
+        max_retries: 3,
+        rate_limit: None,
+        timeout_seconds: 60,
+    };
+
+    // Create provider instance
+    let client = Client::new();
+    let provider = GeminiProvider::new(config, client);
+
+    // Test the health_check method
+    let health = provider.health_check().await.unwrap();
+
+    // Verify response indicates unhealthy status due to network error
+    assert_eq!(health.status, "unhealthy");
+    assert_eq!(health.provider, "gemini");
+    assert!(health.latency_ms.is_some());
+    assert!(health.error.is_some());
+    // Network error should contain connection-related message
+    let error_msg = health.error.unwrap();
+    assert!(error_msg.contains("error") || error_msg.contains("connection") || error_msg.contains("resolve") || error_msg.contains("HTTP"));
+}

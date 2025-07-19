@@ -40,13 +40,15 @@ impl GeminiProvider {
     /// Fetch models from Gemini API
     async fn fetch_models_from_api(&self) -> Result<Vec<ModelInfo>, AppError> {
         let url = format!(
-            "{}models?key={}",
+            "{}/models?key={}",
             self.config
                 .api_base
                 .trim_end_matches('/')
                 .replace("/v1beta/models", "/v1beta"),
             self.config.api_key
         );
+
+        tracing::info!("Fetching models from URL: {}", url);
 
         let response = self
             .client
@@ -61,6 +63,7 @@ impl GeminiProvider {
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let error_body = response.text().await.unwrap_or_default();
+            tracing::warn!("Gemini models API error: status={}, body={}", status, error_body);
             return Err(AppError::ProviderError {
                 status,
                 message: format!("Gemini models API error: {}", error_body),
@@ -171,11 +174,166 @@ impl AIProvider for GeminiProvider {
         self.convert_response(gemini_res, &request.model)
     }
 
-    async fn chat_stream(&self, _request: AnthropicRequest) -> Result<StreamResponse, AppError> {
-        // TODO: Implement streaming support
-        Err(AppError::InternalServerError(
-            "Streaming not yet implemented for Gemini provider".to_string(),
-        ))
+    async fn chat_stream(&self, request: AnthropicRequest) -> Result<StreamResponse, AppError> {
+        use futures::StreamExt;
+        
+        // Validate request
+        request.validate().map_err(AppError::ValidationError)?;
+
+        // Convert to Gemini format
+        let gemini_req = self.convert_request(&request)?;
+
+        // Build streaming URL
+        let url = format!(
+            "{}/{}:streamGenerateContent?key={}",
+            self.config.api_base.trim_end_matches('/'),
+            request.model,
+            self.config.api_key
+        );
+
+        tracing::info!("Starting Gemini streaming request to: {}", url);
+
+        // Send streaming request
+        let response = self
+            .client
+            .post(&url)
+            .json(&gemini_req)
+            .send()
+            .await
+            .map_err(|e| AppError::ProviderError {
+                status: 500,
+                message: format!("Failed to send streaming request to Gemini: {}", e),
+            })?;
+
+        // Check for HTTP errors
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let error_body = response.text().await.unwrap_or_default();
+            return Err(AppError::ProviderError {
+                status,
+                message: format!("Gemini streaming API error: {}", error_body),
+            });
+        }
+
+        // Get the response body as a stream
+        let body = response.bytes_stream();
+        
+        // Generate unique message ID for this streaming session
+        let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+        let model_name = request.model.clone();
+        
+        // Process streaming bytes and convert to SSE events
+        let sse_stream = body
+            .enumerate()
+            .filter_map(move |(chunk_index, chunk_result)| {
+                let message_id = message_id.clone();
+                let model_name = model_name.clone();
+                
+                async move {
+                    match chunk_result {
+                        Ok(bytes) => {
+                            // Convert bytes to string
+                            let chunk_str = String::from_utf8_lossy(&bytes);
+                            
+                            // Process complete lines from chunk
+                            let mut sse_events = Vec::new();
+                            let lines: Vec<&str> = chunk_str.lines().collect();
+                            
+                            for (line_index, line) in lines.iter().enumerate() {
+                                // Skip empty lines
+                                if line.trim().is_empty() {
+                                    continue;
+                                }
+
+                                // Parse JSON line from Gemini streaming response
+                                match serde_json::from_str::<GeminiStreamResponse>(line) {
+                                    Ok(gemini_stream) => {
+                                        // Add message start event if this is the first chunk
+                                        if chunk_index == 0 && line_index == 0 {
+                                            let start_event = GeminiStreamResponse::create_message_start_event(&model_name, &message_id);
+                                            if let Ok(start_json) = serde_json::to_string(&start_event) {
+                                                sse_events.push(format!("event: message_start\ndata: {}\n\n", start_json));
+                                            }
+                                            
+                                            // Add content block start event
+                                            let content_start_event = GeminiStreamResponse::create_content_block_start_event();
+                                            if let Ok(content_json) = serde_json::to_string(&content_start_event) {
+                                                sse_events.push(format!("event: content_block_start\ndata: {}\n\n", content_json));
+                                            }
+                                        }
+                                        
+                                        // Convert to Anthropic streaming events
+                                        match gemini_stream.to_anthropic_events(&model_name, &message_id) {
+                                            Ok(events) => {
+                                                // Convert each event to SSE format
+                                                for event in events {
+                                                    match event {
+                                                        AnthropicStreamEvent::ContentBlockDelta { .. } => {
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("event: content_block_delta\ndata: {}\n\n", json));
+                                                            }
+                                                        }
+                                                        AnthropicStreamEvent::MessageDelta { .. } => {
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("event: message_delta\ndata: {}\n\n", json));
+                                                            }
+                                                        }
+                                                        AnthropicStreamEvent::MessageStop => {
+                                                            // Add content block stop first
+                                                            let content_stop = AnthropicStreamEvent::ContentBlockStop { index: 0 };
+                                                            if let Ok(json) = serde_json::to_string(&content_stop) {
+                                                                sse_events.push(format!("event: content_block_stop\ndata: {}\n\n", json));
+                                                            }
+                                                            
+                                                            // Then add message stop
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("event: message_stop\ndata: {}\n\n", json));
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("data: {}\n\n", json));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::error!("Failed to convert Gemini stream to Anthropic events: {}", e);
+                                                let error_event = GeminiStreamResponse::create_error_event(&e);
+                                                if let Ok(json) = serde_json::to_string(&error_event) {
+                                                    sse_events.push(format!("event: error\ndata: {}\n\n", json));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(parse_err) => {
+                                        tracing::warn!("Failed to parse Gemini streaming response line: {} - Error: {}", line, parse_err);
+                                        // Skip malformed lines but continue streaming
+                                    }
+                                }
+                            }
+                            
+                            if !sse_events.is_empty() {
+                                Some(Ok(sse_events.join("")))
+                            } else {
+                                None
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Error reading streaming response chunk: {}", e);
+                            let app_error = AppError::ProviderError {
+                                status: 500,
+                                message: format!("Streaming read error: {}", e),
+                            };
+                            Some(Err(app_error))
+                        }
+                    }
+                }
+            });
+
+        tracing::info!("Gemini streaming response initialized successfully");
+        Ok(Box::pin(sse_stream))
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
@@ -219,7 +377,7 @@ impl AIProvider for GeminiProvider {
 
         // Simple health check by trying to list models
         let url = format!(
-            "{}models?key={}",
+            "{}/models?key={}",
             self.config
                 .api_base
                 .trim_end_matches('/')
