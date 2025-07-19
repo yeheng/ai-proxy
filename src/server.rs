@@ -16,12 +16,13 @@ use crate::{
     config::Config,
     errors::{AppError, AppResult},
     providers::{ProviderRegistry, anthropic::AnthropicRequest},
+    metrics::MetricsCollector,
 };
 
 /// 应用程序状态 - 在所有请求处理器之间共享
 /// 
 /// 包含请求处理器所需的所有共享资源，
-/// 包括配置、HTTP客户端和提供商注册表
+/// 包括配置、HTTP客户端、提供商注册表和指标收集器
 #[derive(Clone)]
 pub struct AppState {
     /// 应用程序配置（只读共享）
@@ -30,6 +31,8 @@ pub struct AppState {
     pub http_client: Client,
     /// 提供商注册表，管理所有AI提供商
     pub provider_registry: Arc<Mutex<ProviderRegistry>>,
+    /// 指标收集器，用于系统监控
+    pub metrics: Arc<MetricsCollector>,
 }
 
 impl AppState {
@@ -76,6 +79,7 @@ impl AppState {
             config: Arc::new(config),  // 配置的只读共享
             http_client,  // HTTP客户端
             provider_registry,  // 提供商注册表的线程安全共享
+            metrics: Arc::new(MetricsCollector::new()),  // 指标收集器
         })
     }
 }
@@ -119,6 +123,8 @@ pub fn create_app(state: AppState) -> Router {
         // 健康检查端点
         .route("/health", get(health_handler))
         .route("/health/providers", get(health_providers_handler))
+        // 指标端点
+        .route("/metrics", get(metrics_handler))
         // 添加共享状态
         .with_state(state)
         // 添加中间件层
@@ -180,6 +186,7 @@ pub async fn start_server(config: Config) -> AppResult<()> {
     tracing::info!("  POST /v1/models/refresh - Refresh models from providers");
     tracing::info!("  GET  /health - System health check");
     tracing::info!("  GET  /health/providers - Provider health check");
+    tracing::info!("  GET  /metrics - System metrics and statistics");
 
     // Start server
     axum::serve(listener, app).await
@@ -197,46 +204,80 @@ async fn chat_handler(
 ) -> AppResult<axum::response::Response> {
     use axum::response::{Response, IntoResponse};
     use axum::body::Body;
-    use futures::StreamExt;
+    
+    // Record request start time for metrics
+    let start_time = state.metrics.record_request_start();
     
     tracing::info!("Processing chat request for model: {}", request.model);
 
+    // Extract provider name from model for metrics
+    let provider_name = if request.model.starts_with("gpt") || request.model.starts_with("openai") {
+        "openai"
+    } else if request.model.starts_with("gemini") {
+        "gemini"
+    } else if request.model.starts_with("claude") || request.model.starts_with("anthropic") {
+        "anthropic"
+    } else {
+        "unknown"
+    };
+
     // Get provider for the requested model
-    let provider = {
+    let provider_result = {
         let registry = state.provider_registry.lock().await;
-        registry.get_provider_for_model(&request.model)?
+        registry.get_provider_for_model(&request.model)
+    };
+
+    let provider = match provider_result {
+        Ok(p) => p,
+        Err(e) => {
+            // Record failed request
+            state.metrics.record_request_end(start_time, false, provider_name, &request.model).await;
+            return Err(e);
+        }
     };
 
     // Handle streaming vs non-streaming
-    if request.stream.unwrap_or(false) {
+    let result = if request.stream.unwrap_or(false) {
         tracing::info!("Processing streaming chat request");
         
         // Get streaming response
-        let stream = provider.chat_stream(request).await?;
-        
-        // Convert stream to HTTP response body
-        let body = Body::from_stream(stream);
-        
-        // Create SSE response
-        let response = Response::builder()
-            .status(200)
-            .header("Content-Type", "text/event-stream")
-            .header("Cache-Control", "no-cache")
-            .header("Connection", "keep-alive")
-            .header("Access-Control-Allow-Origin", "*")
-            .header("Access-Control-Allow-Headers", "Content-Type")
-            .body(body)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create streaming response: {}", e)))?;
-            
-        tracing::info!("Streaming chat request initialized successfully");
-        Ok(response)
+        match provider.chat_stream(request.clone()).await {
+            Ok(stream) => {
+                // Convert stream to HTTP response body
+                let body = Body::from_stream(stream);
+                
+                // Create SSE response
+                let response = Response::builder()
+                    .status(200)
+                    .header("Content-Type", "text/event-stream")
+                    .header("Cache-Control", "no-cache")
+                    .header("Connection", "keep-alive")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Headers", "Content-Type")
+                    .body(body)
+                    .map_err(|e| AppError::InternalServerError(format!("Failed to create streaming response: {}", e)))?;
+                    
+                tracing::info!("Streaming chat request initialized successfully");
+                Ok(response)
+            }
+            Err(e) => Err(e)
+        }
     } else {
         // Process non-streaming request
-        let response = provider.chat(request).await?;
-        
-        tracing::info!("Chat request completed successfully");
-        Ok(Json(serde_json::to_value(response).unwrap()).into_response())
-    }
+        match provider.chat(request.clone()).await {
+            Ok(response) => {
+                tracing::info!("Chat request completed successfully");
+                Ok(Json(serde_json::to_value(response).unwrap()).into_response())
+            }
+            Err(e) => Err(e)
+        }
+    };
+
+    // Record request completion
+    let success = result.is_ok();
+    state.metrics.record_request_end(start_time, success, provider_name, &request.model).await;
+
+    result
 }
 
 /// Handle model listing requests
@@ -332,5 +373,21 @@ async fn health_providers_handler(
     });
 
     tracing::info!("Provider health check completed");
+    Ok(Json(response))
+}
+
+/// Handle metrics endpoint
+async fn metrics_handler(
+    State(state): State<AppState>,
+) -> AppResult<Json<Value>> {
+    tracing::info!("Processing metrics request");
+
+    let metrics_summary = state.metrics.get_metrics_summary().await;
+    
+    let response = json!({
+        "metrics": metrics_summary
+    });
+
+    tracing::info!("Metrics request completed");
     Ok(Json(response))
 }
