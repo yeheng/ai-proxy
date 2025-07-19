@@ -3,3 +3,4 @@
 mod registry_tests;
 mod anthropic_tests;
 mod gemini_test;
+mod openai_tests;

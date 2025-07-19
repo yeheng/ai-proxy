@@ -69,26 +69,26 @@
   - 添加提供商特定的错误处理
   - _需求: 7.1, 7.2, 8.2_
 
-- [ ] 5. 实现 OpenAI 提供商适配器
-- [ ] 5.1 创建 OpenAI 数据模型和转换函数
+- [x] 5. 实现 OpenAI 提供商适配器
+- [x] 5.1 创建 OpenAI 数据模型和转换函数
   - 定义 OpenAI API 特定的请求/响应结构体
   - 实现 Anthropic 格式到 OpenAI 格式的转换函数
   - 实现 OpenAI 响应到 Anthropic 格式的转换函数
   - _需求: 1.3, 2.1_
 
-- [ ] 5.2 实现 OpenAI 非流式聊天功能
+- [x] 5.2 实现 OpenAI 非流式聊天功能
   - 创建 OpenAIProvider 结构体实现 AIProvider trait
   - 实现 chat 方法处理非流式请求
   - 添加 OpenAI API 特定的认证和错误处理
   - _需求: 1.1, 1.3, 2.1, 5.3_
 
-- [ ] 5.3 实现 OpenAI 流式聊天功能
+- [x] 5.3 实现 OpenAI 流式聊天功能
   - 实现 chat_stream 方法处理流式请求
   - 处理 OpenAI 的流式响应格式转换
   - 实现流式数据的实时转换和转发
   - _需求: 3.1, 3.2, 3.3_
 
-- [ ] 5.4 添加 OpenAI 模型列表和健康检查
+- [x] 5.4 添加 OpenAI 模型列表和健康检查
   - 实现 list_models 方法返回可用模型
   - 实现 health_check 方法验证提供商连通性
   - 添加 OpenAI 特定的错误处理
