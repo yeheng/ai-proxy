@@ -1,17 +1,19 @@
 use ai_proxy::{
-    server::{create_app, AppState},
-    config::{Config, ServerConfig, ProviderDetail, LoggingConfig, SecurityConfig, PerformanceConfig},
-    providers::registry::ProviderRegistry,
+    config::{
+        Config, LoggingConfig, PerformanceConfig, ProviderDetail, SecurityConfig, ServerConfig,
+    },
     metrics::MetricsCollector,
+    providers::registry::ProviderRegistry,
+    server::{AppState, create_app},
 };
 use axum::{
     body::Body,
-    http::{Request, StatusCode, Method}
+    http::{Method, Request, StatusCode},
 };
 use reqwest::Client;
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tower::ServiceExt;
 
 // Helper function to create test configuration
@@ -51,17 +53,21 @@ fn create_test_app_state() -> AppState {
     // Create registry with config and http client
     let registry = ProviderRegistry::new(&config, http_client.clone()).unwrap_or_else(|_| {
         // If provider creation fails, create empty registry for testing
-        ProviderRegistry::new(&Config {
-            server: config.server.clone(),
-            providers: HashMap::new(),
-            logging: config.logging.clone(),
-            security: config.security.clone(),
-            performance: config.performance.clone(),
-        }, http_client.clone()).unwrap()
+        ProviderRegistry::new(
+            &Config {
+                server: config.server.clone(),
+                providers: HashMap::new(),
+                logging: config.logging.clone(),
+                security: config.security.clone(),
+                performance: config.performance.clone(),
+            },
+            http_client.clone(),
+        )
+        .unwrap()
     });
-    let provider_registry = Arc::new(Mutex::new(registry));
+    let provider_registry = Arc::new(RwLock::new(registry));
     let metrics = Arc::new(MetricsCollector::new());
-    
+
     AppState {
         config: Arc::new(config),
         http_client,
@@ -104,7 +110,7 @@ async fn test_create_app_basic_routes() {
 
     let response = app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // Test metrics endpoint
     let request = Request::builder()
         .method(Method::GET)
@@ -157,11 +163,14 @@ async fn test_chat_handler_validation_error() {
         .method(Method::POST)
         .uri("/v1/messages")
         .header("content-type", "application/json")
-        .body(Body::from(json!({
-            "model": "test-model",
-            "messages": [],
-            "max_tokens": 100
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "model": "test-model",
+                "messages": [],
+                "max_tokens": 100
+            })
+            .to_string(),
+        ))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
@@ -181,7 +190,7 @@ async fn test_models_handler_success() {
 
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // Response should be JSON
     let content_type = response.headers().get("content-type").unwrap();
     assert!(content_type.to_str().unwrap().contains("application/json"));
@@ -200,7 +209,7 @@ async fn test_health_handler_success() {
 
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // Response should be JSON
     let content_type = response.headers().get("content-type").unwrap();
     assert!(content_type.to_str().unwrap().contains("application/json"));
@@ -219,7 +228,7 @@ async fn test_providers_health_handler_success() {
 
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // Response should be JSON
     let content_type = response.headers().get("content-type").unwrap();
     assert!(content_type.to_str().unwrap().contains("application/json"));
@@ -270,7 +279,7 @@ async fn test_cors_headers() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    
+
     // Should handle CORS preflight
     assert!(response.status().is_success() || response.status() == StatusCode::NO_CONTENT);
 }
@@ -287,7 +296,7 @@ async fn test_request_id_header() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    
+
     // Should include request ID header
     assert!(response.headers().contains_key("x-request-id"));
 }
@@ -302,16 +311,19 @@ async fn test_streaming_endpoint() {
         .uri("/v1/messages")
         .header("content-type", "application/json")
         .header("accept", "text/event-stream")
-        .body(Body::from(json!({
-            "model": "test-model",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "max_tokens": 100,
-            "stream": true
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+                "stream": true
+            })
+            .to_string(),
+        ))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    
+
     // Should handle streaming requests (even if provider is not available)
     // The response might be an error, but it should be handled gracefully
     assert!(response.status().is_client_error() || response.status().is_server_error());
@@ -383,10 +395,10 @@ async fn test_middleware_integration() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    
+
     // Should have middleware-added headers
     assert!(response.headers().contains_key("x-request-id"));
-    
+
     // Should handle the request successfully
     assert_eq!(response.status(), StatusCode::OK);
 }
@@ -398,16 +410,16 @@ fn test_app_state_creation() {
     let config = create_test_config();
     let http_client = Client::new();
     let registry = ProviderRegistry::new(&config, http_client.clone()).unwrap();
-    let provider_registry = Arc::new(Mutex::new(registry));
+    let provider_registry = Arc::new(RwLock::new(registry));
     let metrics = Arc::new(MetricsCollector::new());
-    
+
     let app_state = AppState {
         config: Arc::new(config),
         http_client,
         provider_registry,
         metrics,
     };
-    
+
     // Verify app state is created correctly
     assert_eq!(app_state.config.server.port, 3000);
     assert!(!app_state.config.providers.is_empty());
@@ -422,7 +434,7 @@ async fn test_concurrent_requests() {
 
     // Create multiple concurrent requests
     let mut handles = vec![];
-    
+
     for i in 0..10 {
         let app_clone = app.clone();
         let handle = tokio::spawn(async move {
@@ -437,10 +449,10 @@ async fn test_concurrent_requests() {
         });
         handles.push(handle);
     }
-    
+
     // Wait for all requests to complete
     let responses = futures::future::join_all(handles).await;
-    
+
     // All requests should succeed
     for response_result in responses {
         let response = response_result.unwrap();
@@ -465,7 +477,7 @@ async fn test_request_size_limits() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    
+
     // Should handle large requests appropriately (either accept or reject with proper status)
     assert!(response.status().is_client_error() || response.status().is_success());
 }
@@ -480,11 +492,17 @@ async fn test_graceful_error_handling() {
     // Test various error scenarios
     let error_scenarios = vec![
         // Malformed JSON
-        (r#"{"model": "test", "messages": [{"role": "user", "content": "hello"}"#, StatusCode::BAD_REQUEST),
+        (
+            r#"{"model": "test", "messages": [{"role": "user", "content": "hello"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
         // Missing required fields
         (r#"{"messages": []}"#, StatusCode::BAD_REQUEST),
         // Invalid field values
-        (r#"{"model": "", "messages": [], "max_tokens": -1}"#, StatusCode::BAD_REQUEST),
+        (
+            r#"{"model": "", "messages": [], "max_tokens": -1}"#,
+            StatusCode::BAD_REQUEST,
+        ),
     ];
 
     for (body, expected_status) in error_scenarios {
@@ -497,7 +515,7 @@ async fn test_graceful_error_handling() {
 
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), expected_status);
-        
+
         // Response should be JSON with error details
         let content_type = response.headers().get("content-type").unwrap();
         assert!(content_type.to_str().unwrap().contains("application/json"));

@@ -11,16 +11,16 @@ use ai_proxy::{
     server::AppState,
 };
 use axum::{
+    Router,
     body::Body,
     http::{Request, StatusCode},
     middleware,
     response::Response,
     routing::{get, post},
-    Router,
 };
 use reqwest::Client;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tower::ServiceExt;
 
 // Helper function to create test app state
@@ -53,7 +53,7 @@ fn create_test_app_state() -> AppState {
     };
 
     let http_client = Client::new();
-    let provider_registry = Arc::new(Mutex::new(
+    let provider_registry = Arc::new(RwLock::new(
         ProviderRegistry::new(&config, http_client.clone()).unwrap(),
     ));
     let metrics = Arc::new(MetricsCollector::new());

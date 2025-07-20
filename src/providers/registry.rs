@@ -101,6 +101,20 @@ impl ProviderRegistry {
         })
     }
 
+    /// Create an empty provider registry for testing purposes
+    ///
+    /// ## 功能说明
+    /// 创建一个空的提供商注册表，主要用于测试错误处理场景
+    ///
+    /// ## 返回值
+    /// 返回一个没有任何提供商的注册表实例
+    pub fn new_empty() -> Self {
+        Self {
+            providers: HashMap::new(),
+            model_mapping: HashMap::new(),
+        }
+    }
+
     /// 根据模型名称获取对应的提供商
     ///
     /// ## 功能说明

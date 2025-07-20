@@ -1,26 +1,23 @@
 /// Integration Testing Framework for AI Proxy
-/// 
+///
 /// This module provides comprehensive testing utilities for end-to-end integration testing
 /// including mock server setup, streaming response validation, and multi-provider testing.
-
 use ai_proxy::{
-    config::{Config, ServerConfig, ProviderDetail, LoggingConfig, SecurityConfig, PerformanceConfig},
-    server::AppState,
-    providers::{ProviderRegistry},
+    config::{
+        Config, LoggingConfig, PerformanceConfig, ProviderDetail, SecurityConfig, ServerConfig,
+    },
+    providers::ProviderRegistry,
     providers::anthropic::{AnthropicRequest, Message},
+    server::AppState,
 };
-use axum::{
-    body::Body,
-    http::Request,
-    response::Response,
-};
+use axum::{body::Body, http::Request, response::Response};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use wiremock::{
-    matchers::{method, path, path_regex, header as wiremock_header, body_json, query_param},
     Mock, MockServer, ResponseTemplate,
+    matchers::{body_json, header as wiremock_header, method, path, query_param},
 };
 
 /// Mock server management for integration tests
@@ -67,19 +64,19 @@ impl IntegrationTestFramework {
     /// Get provider URLs for configuration
     pub fn get_provider_urls(&self) -> HashMap<String, String> {
         let mut urls = HashMap::new();
-        
+
         if let Some(server) = &self.openai_server {
             urls.insert("openai".to_string(), server.uri());
         }
-        
+
         if let Some(server) = &self.anthropic_server {
             urls.insert("anthropic".to_string(), server.uri());
         }
-        
+
         if let Some(server) = &self.gemini_server {
             urls.insert("gemini".to_string(), server.uri());
         }
-        
+
         urls
     }
 
@@ -112,10 +109,10 @@ impl IntegrationTestFramework {
                     api_key: "test-anthropic-key-1234567890".to_string(),
                     api_base: format!("{}/v1/", anthropic_url),
                     models: Some(vec![
-                        "claude-3-sonnet-20240229".to_string(), 
+                        "claude-3-sonnet-20240229".to_string(),
                         "claude-3-haiku-20240307".to_string(),
                         "claude-3-sonnet".to_string(),
-                        "claude-3-haiku".to_string()
+                        "claude-3-haiku".to_string(),
                     ]),
                     timeout_seconds: 30,
                     max_retries: 3,
@@ -133,10 +130,10 @@ impl IntegrationTestFramework {
                     api_key: "test-gemini-key-1234567890".to_string(),
                     api_base: format!("{}/v1/", gemini_url),
                     models: Some(vec![
-                        "gemini-pro".to_string(), 
+                        "gemini-pro".to_string(),
                         "gemini-pro-vision".to_string(),
                         "gemini-1.5-pro-latest".to_string(),
-                        "gemini-1.5-flash-latest".to_string()
+                        "gemini-1.5-flash-latest".to_string(),
                     ]),
                     timeout_seconds: 30,
                     max_retries: 3,
@@ -169,9 +166,11 @@ impl IntegrationTestFramework {
     pub async fn create_app_state(&self) -> AppState {
         let config = self.create_test_config();
         let http_client = Client::new();
-        let provider_registry = Arc::new(Mutex::new(ProviderRegistry::new(&config, http_client.clone()).unwrap()));
+        let provider_registry = Arc::new(RwLock::new(
+            ProviderRegistry::new(&config, http_client.clone()).unwrap(),
+        ));
         let metrics = Arc::new(ai_proxy::metrics::MetricsCollector::new());
-        
+
         AppState {
             config: Arc::new(config),
             http_client,
@@ -192,18 +191,23 @@ impl IntegrationTestFramework {
                     false
                 }
             })
-            .respond_with(ResponseTemplate::new(200)
-                .set_body_string(Self::create_openai_stream_response())
-                .insert_header("content-type", "text/event-stream")
-                .insert_header("cache-control", "no-cache")
-                .insert_header("connection", "keep-alive"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(Self::create_openai_stream_response())
+                    .insert_header("content-type", "text/event-stream")
+                    .insert_header("cache-control", "no-cache")
+                    .insert_header("connection", "keep-alive"),
+            )
             .mount(server)
             .await;
 
         // Standard chat completion (non-streaming fallback)
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .and(wiremock_header("authorization", "Bearer test-openai-key-1234567890"))
+            .and(wiremock_header(
+                "authorization",
+                "Bearer test-openai-key-1234567890",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "id": "chatcmpl-test123",
                 "object": "chat.completion",
@@ -268,11 +272,13 @@ impl IntegrationTestFramework {
     async fn setup_anthropic_mocks(&self, server: &MockServer) {
         // Streaming chat response - allow any path and headers for now
         Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(200)
-                .set_body_string(Self::create_anthropic_stream_response())
-                .insert_header("content-type", "text/event-stream")
-                .insert_header("cache-control", "no-cache")
-                .insert_header("connection", "keep-alive"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(Self::create_anthropic_stream_response())
+                    .insert_header("content-type", "text/event-stream")
+                    .insert_header("cache-control", "no-cache")
+                    .insert_header("connection", "keep-alive"),
+            )
             .mount(server)
             .await;
 
@@ -339,10 +345,12 @@ impl IntegrationTestFramework {
 
         // Streaming chat completion - more permissive
         Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(200)
-                .set_body_string(Self::create_gemini_stream_response())
-                .insert_header("content-type", "application/json")
-                .insert_header("connection", "keep-alive"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(Self::create_gemini_stream_response())
+                    .insert_header("content-type", "application/json")
+                    .insert_header("connection", "keep-alive"),
+            )
             .mount(server)
             .await;
 
@@ -419,7 +427,8 @@ impl IntegrationTestFramework {
             json!({"type": "message_stop"}),
         ];
 
-        events.iter()
+        events
+            .iter()
             .map(|event| format!("data: {}\n\n", serde_json::to_string(event).unwrap()))
             .collect::<Vec<_>>()
             .join("")
@@ -450,37 +459,41 @@ impl StreamingValidator {
     pub fn validate_sse_response(response_body: &str) -> StreamingValidationResult {
         let mut result = StreamingValidationResult::new();
         let lines: Vec<&str> = response_body.lines().collect();
-        
+
         // let mut current_event = String::new();
         let mut in_event = false;
-        
+
         for line in lines {
             if line.starts_with("data: ") {
                 let data = &line[6..]; // Remove "data: " prefix
                 // let current_event = data.to_string();
                 in_event = true;
                 result.event_count += 1;
-                
+
                 // Try to parse as JSON
                 if !data.is_empty() && data != "[DONE]" {
                     match serde_json::from_str::<Value>(data) {
                         Ok(event_json) => {
                             result.valid_json_events += 1;
-                            
-                            if let Some(event_type) = event_json.get("type").and_then(|t| t.as_str()) {
+
+                            if let Some(event_type) =
+                                event_json.get("type").and_then(|t| t.as_str())
+                            {
                                 result.event_types.push(event_type.to_string());
-                                
+
                                 match event_type {
                                     "message_start" => result.has_message_start = true,
                                     "content_block_start" => result.has_content_start = true,
                                     "content_block_delta" => {
                                         result.has_content_delta = true;
                                         if let Some(delta) = event_json.get("delta") {
-                                            if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
+                                            if let Some(text) =
+                                                delta.get("text").and_then(|t| t.as_str())
+                                            {
                                                 result.content_chunks.push(text.to_string());
                                             }
                                         }
-                                    },
+                                    }
                                     "content_block_stop" => result.has_content_stop = true,
                                     "message_delta" => result.has_message_delta = true,
                                     "message_stop" => result.has_message_stop = true,
@@ -488,7 +501,7 @@ impl StreamingValidator {
                                     _ => {}
                                 }
                             }
-                        },
+                        }
                         Err(_) => result.invalid_json_events += 1,
                     }
                 }
@@ -496,7 +509,7 @@ impl StreamingValidator {
                 in_event = false;
             }
         }
-        
+
         result.full_content = result.content_chunks.join("");
         result.is_valid = result.validate();
         result
@@ -558,11 +571,11 @@ impl StreamingValidationResult {
 
     fn validate(&self) -> bool {
         // Basic validation rules
-        self.event_count > 0 &&
-        self.valid_json_events > 0 &&
-        self.has_message_start &&
-        self.has_message_stop &&
-        (self.has_content_delta || !self.full_content.is_empty())
+        self.event_count > 0
+            && self.valid_json_events > 0
+            && self.has_message_start
+            && self.has_message_stop
+            && (self.has_content_delta || !self.full_content.is_empty())
     }
 }
 
@@ -584,13 +597,17 @@ impl TestUtils {
 
     /// Parse response body as JSON
     pub async fn parse_response_json(response: Response<Body>) -> Value {
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         serde_json::from_slice(&body_bytes).unwrap()
     }
 
     /// Parse response body as string
     pub async fn parse_response_string(response: Response<Body>) -> String {
-        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         String::from_utf8(body_bytes.to_vec()).unwrap()
     }
 
@@ -624,7 +641,10 @@ impl TestUtils {
 
     /// Verify streaming response headers
     pub fn verify_streaming_headers(response: &Response<Body>) {
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/event-stream");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/event-stream"
+        );
         assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
     }
 }
@@ -654,7 +674,7 @@ impl PerformanceTestUtils {
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         let mut handles = Vec::new();
-        
+
         for _ in 0..concurrency {
             let op = operation_factory();
             let handle = tokio::spawn(async move {

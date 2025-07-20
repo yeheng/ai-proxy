@@ -1,37 +1,34 @@
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use axum::{
+    Router,
     extract::State,
+    middleware,
     response::Json,
     routing::{get, post},
-    Router,
-    middleware,
 };
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::RwLock;
 
 use tower_http::{
-    trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse},
     cors::CorsLayer,
+    trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
 };
 
 use crate::{
     config::Config,
     errors::{AppError, AppResult},
-    providers::{ProviderRegistry, anthropic::AnthropicRequest},
     metrics::MetricsCollector,
     middleware::{
-        logging_middleware,
-        error_handling_middleware,
-        validation_middleware,
-        performance_middleware,
-        request_id_middleware,
+        error_handling_middleware, logging_middleware, performance_middleware,
+        request_id_middleware, validation_middleware,
     },
+    providers::{ProviderRegistry, anthropic::AnthropicRequest},
 };
 
 /// 应用程序状态 - 在所有请求处理器之间共享
-/// 
+///
 /// 包含请求处理器所需的所有共享资源，
 /// 包括配置、HTTP客户端、提供商注册表和指标收集器
 #[derive(Clone)]
@@ -41,7 +38,7 @@ pub struct AppState {
     /// HTTP客户端，用于与AI提供商通信
     pub http_client: Client,
     /// 提供商注册表，管理所有AI提供商
-    pub provider_registry: Arc<Mutex<ProviderRegistry>>,
+    pub provider_registry: Arc<RwLock<ProviderRegistry>>,
     /// 指标收集器，用于系统监控
     pub metrics: Arc<MetricsCollector>,
 }
@@ -75,22 +72,23 @@ impl AppState {
     pub fn new(config: Config) -> AppResult<Self> {
         // 创建带连接池的HTTP客户端
         let http_client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))  // 30秒超时
-            .pool_max_idle_per_host(10)  // 每个主机最多10个空闲连接
-            .pool_idle_timeout(std::time::Duration::from_secs(90))  // 90秒空闲超时
+            .timeout(std::time::Duration::from_secs(30)) // 30秒超时
+            .pool_max_idle_per_host(10) // 每个主机最多10个空闲连接
+            .pool_idle_timeout(std::time::Duration::from_secs(90)) // 90秒空闲超时
             .build()
             .map_err(|e| AppError::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
 
         // 创建提供商注册表
-        let provider_registry = Arc::new(Mutex::new(
-            ProviderRegistry::new(&config, http_client.clone())?
-        ));
+        let provider_registry = Arc::new(RwLock::new(ProviderRegistry::new(
+            &config,
+            http_client.clone(),
+        )?));
 
         Ok(Self {
-            config: Arc::new(config),  // 配置的只读共享
-            http_client,  // HTTP客户端
-            provider_registry,  // 提供商注册表的线程安全共享
-            metrics: Arc::new(MetricsCollector::new()),  // 指标收集器
+            config: Arc::new(config),                   // 配置的只读共享
+            http_client,                                // HTTP客户端
+            provider_registry,                          // 提供商注册表的线程安全共享
+            metrics: Arc::new(MetricsCollector::new()), // 指标收集器
         })
     }
 }
@@ -163,7 +161,7 @@ pub fn create_app(state: AppState) -> Router {
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().include_headers(true))
-                .on_response(DefaultOnResponse::new().include_headers(true))
+                .on_response(DefaultOnResponse::new().include_headers(true)),
         )
 }
 
@@ -199,7 +197,12 @@ pub async fn start_server(config: Config) -> AppResult<()> {
     let app_state = AppState::new(config.clone())?;
 
     tracing::info!(
-        providers_configured = app_state.provider_registry.lock().await.get_provider_ids().len(),
+        providers_configured = app_state
+            .provider_registry
+            .read()
+            .await
+            .get_provider_ids()
+            .len(),
         "Application state initialized"
     );
 
@@ -208,7 +211,8 @@ pub async fn start_server(config: Config) -> AppResult<()> {
 
     // 创建TCP监听器
     let addr = format!("{}:{}", config.server.host, config.server.port);
-    let listener = TcpListener::bind(&addr).await
+    let listener = TcpListener::bind(&addr)
+        .await
         .map_err(|e| AppError::ConfigError(format!("Failed to bind to {}: {}", addr, e)))?;
 
     // 记录服务器启动信息
@@ -216,7 +220,7 @@ pub async fn start_server(config: Config) -> AppResult<()> {
         address = %addr,
         "AI Proxy server starting"
     );
-    
+
     tracing::info!("Available endpoints:");
     tracing::info!("  POST /v1/messages - Chat completion with streaming support");
     tracing::info!("  GET  /v1/models - List available models from all providers");
@@ -235,7 +239,8 @@ pub async fn start_server(config: Config) -> AppResult<()> {
 
     // Start server with graceful shutdown support
     tracing::info!("Server ready to accept connections");
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .await
         .map_err(|e| AppError::InternalServerError(format!("Server error: {}", e)))?;
 
     tracing::info!("Server shutdown completed");
@@ -249,12 +254,12 @@ async fn chat_handler(
     State(state): State<AppState>,
     Json(request): Json<AnthropicRequest>,
 ) -> AppResult<axum::response::Response> {
-    use axum::response::{Response, IntoResponse};
     use axum::body::Body;
-    
+    use axum::response::{IntoResponse, Response};
+
     // Record request start time for metrics
     let start_time = state.metrics.record_request_start();
-    
+
     tracing::info!("Processing chat request for model: {}", request.model);
 
     // Extract provider name from model for metrics
@@ -270,7 +275,7 @@ async fn chat_handler(
 
     // Get provider for the requested model
     let provider_result = {
-        let registry = state.provider_registry.lock().await;
+        let registry = state.provider_registry.read().await;
         registry.get_provider_for_model(&request.model)
     };
 
@@ -278,7 +283,10 @@ async fn chat_handler(
         Ok(p) => p,
         Err(e) => {
             // Record failed request
-            state.metrics.record_request_end(start_time, false, provider_name, &request.model).await;
+            state
+                .metrics
+                .record_request_end(start_time, false, provider_name, &request.model)
+                .await;
             return Err(e);
         }
     };
@@ -286,13 +294,13 @@ async fn chat_handler(
     // Handle streaming vs non-streaming
     let result = if request.stream.unwrap_or(false) {
         tracing::info!("Processing streaming chat request");
-        
+
         // Get streaming response
         match provider.chat_stream(request.clone()).await {
             Ok(stream) => {
                 // Convert stream to HTTP response body
                 let body = Body::from_stream(stream);
-                
+
                 // Create SSE response
                 let response = Response::builder()
                     .status(200)
@@ -302,12 +310,17 @@ async fn chat_handler(
                     .header("Access-Control-Allow-Origin", "*")
                     .header("Access-Control-Allow-Headers", "Content-Type")
                     .body(body)
-                    .map_err(|e| AppError::InternalServerError(format!("Failed to create streaming response: {}", e)))?;
-                    
+                    .map_err(|e| {
+                        AppError::InternalServerError(format!(
+                            "Failed to create streaming response: {}",
+                            e
+                        ))
+                    })?;
+
                 tracing::info!("Streaming chat request initialized successfully");
                 Ok(response)
             }
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     } else {
         // Process non-streaming request
@@ -316,52 +329,54 @@ async fn chat_handler(
                 tracing::info!("Chat request completed successfully");
                 Ok(Json(serde_json::to_value(response).unwrap()).into_response())
             }
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     };
 
     // Record request completion
     let success = result.is_ok();
-    state.metrics.record_request_end(start_time, success, provider_name, &request.model).await;
+    state
+        .metrics
+        .record_request_end(start_time, success, provider_name, &request.model)
+        .await;
 
     result
 }
 
 /// Handle model listing requests
-async fn list_models_handler(
-    State(state): State<AppState>,
-) -> AppResult<Json<Value>> {
+async fn list_models_handler(State(state): State<AppState>) -> AppResult<Json<Value>> {
     tracing::info!("Processing models list request");
 
     let models = {
-        let registry = state.provider_registry.lock().await;
+        let registry = state.provider_registry.read().await;
         registry.list_all_models().await?
     };
-    
+
     let response = json!({
         "object": "list",
         "data": models
     });
 
-    tracing::info!("Models list request completed, {} models available", models.len());
+    tracing::info!(
+        "Models list request completed, {} models available",
+        models.len()
+    );
     Ok(Json(response))
 }
 
 /// Handle model refresh requests
-async fn refresh_models_handler(
-    State(state): State<AppState>,
-) -> AppResult<Json<Value>> {
+async fn refresh_models_handler(State(state): State<AppState>) -> AppResult<Json<Value>> {
     tracing::info!("Processing models refresh request");
 
     // Refresh models from all providers
     {
-        let mut registry = state.provider_registry.lock().await;
+        let mut registry = state.provider_registry.write().await;
         registry.refresh_models().await?;
     }
 
     // Get updated model statistics
     let stats = {
-        let registry = state.provider_registry.lock().await;
+        let registry = state.provider_registry.read().await;
         registry.get_model_stats()
     };
 
@@ -377,14 +392,12 @@ async fn refresh_models_handler(
 }
 
 /// Handle system health check
-async fn health_handler(
-    State(state): State<AppState>,
-) -> AppResult<Json<Value>> {
+async fn health_handler(State(state): State<AppState>) -> AppResult<Json<Value>> {
     let provider_count = {
-        let registry = state.provider_registry.lock().await;
+        let registry = state.provider_registry.read().await;
         registry.get_provider_ids().len()
     };
-    
+
     let response = json!({
         "status": "healthy",
         "service": "ai-proxy",
@@ -397,16 +410,14 @@ async fn health_handler(
 }
 
 /// Handle provider health checks
-async fn health_providers_handler(
-    State(state): State<AppState>,
-) -> AppResult<Json<Value>> {
+async fn health_providers_handler(State(state): State<AppState>) -> AppResult<Json<Value>> {
     tracing::info!("Processing provider health check");
 
     let health_results = {
-        let registry = state.provider_registry.lock().await;
+        let registry = state.provider_registry.read().await;
         registry.health_check_all().await
     };
-    
+
     let overall_status = if health_results.values().all(|h| h.status == "healthy") {
         "healthy"
     } else {
@@ -424,13 +435,11 @@ async fn health_providers_handler(
 }
 
 /// Handle metrics endpoint
-async fn metrics_handler(
-    State(state): State<AppState>,
-) -> AppResult<Json<Value>> {
+async fn metrics_handler(State(state): State<AppState>) -> AppResult<Json<Value>> {
     tracing::info!("Processing metrics request");
 
     let metrics_summary = state.metrics.get_metrics_summary().await;
-    
+
     let response = json!({
         "metrics": metrics_summary
     });
