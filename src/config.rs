@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use figment::{Figment, providers::{Format, Toml, Env}};
 use std::collections::HashMap;
 use anyhow::{Context, Result};
@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 /// 主配置结构体
 /// 
 /// 包含AI代理服务的所有配置信息，从配置文件和环境变量加载
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Config {
     /// 服务器配置
     pub server: ServerConfig,
@@ -23,7 +23,7 @@ pub struct Config {
     pub performance: PerformanceConfig,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -33,7 +33,7 @@ pub struct ServerConfig {
     pub max_request_size_bytes: usize,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ProviderDetail {
     pub api_key: String,
     pub api_base: String,
@@ -48,7 +48,7 @@ pub struct ProviderDetail {
     pub rate_limit: Option<RateLimitConfig>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct LoggingConfig {
     #[serde(default = "default_log_level")]
     pub level: String,
@@ -60,7 +60,7 @@ pub struct LoggingConfig {
     pub log_responses: bool,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct SecurityConfig {
     #[serde(default)]
     pub api_keys: Vec<String>,
@@ -72,7 +72,7 @@ pub struct SecurityConfig {
     pub rate_limit_enabled: bool,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PerformanceConfig {
     #[serde(default = "default_connection_pool_size")]
     pub connection_pool_size: usize,
@@ -82,7 +82,7 @@ pub struct PerformanceConfig {
     pub max_concurrent_requests: usize,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RateLimitConfig {
     pub requests_per_minute: u32,
     pub burst_size: u32,

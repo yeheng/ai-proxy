@@ -1,12 +1,12 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
-use std::collections::HashMap;
-use tokio::sync::RwLock;
 use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+use tokio::sync::RwLock;
 
 /// 系统指标收集器
-/// 
+///
 /// 负责收集和管理系统运行时的各种指标，包括请求计数、延迟、错误率、并发请求等
 #[derive(Debug, Clone)]
 pub struct MetricsCollector {
@@ -171,7 +171,7 @@ impl MetricsCollector {
     /// ```
     pub async fn increment_concurrent_requests(&self) {
         let current = self.concurrent_requests.fetch_add(1, Ordering::Relaxed) + 1;
-        
+
         // 更新最大并发请求数
         let mut max = self.max_concurrent_requests.load(Ordering::Relaxed);
         while current > max {
@@ -252,7 +252,13 @@ impl MetricsCollector {
     /// // ... 处理请求 ...
     /// metrics.record_request_end(start_time, true, "openai", "gpt-4").await;
     /// ```
-    pub async fn record_request_end(&self, start_time: Instant, success: bool, provider: &str, model: &str) {
+    pub async fn record_request_end(
+        &self,
+        start_time: Instant,
+        success: bool,
+        provider: &str,
+        model: &str,
+    ) {
         let latency = start_time.elapsed();
         let latency_ms = latency.as_millis() as u64;
 
@@ -282,9 +288,10 @@ impl MetricsCollector {
             } else {
                 metrics.failed_requests += 1;
             }
-            
+
             // 更新平均延迟
-            let total_latency = (metrics.avg_latency_ms * (metrics.total_requests - 1) as f64) + latency_ms as f64;
+            let total_latency =
+                (metrics.avg_latency_ms * (metrics.total_requests - 1) as f64) + latency_ms as f64;
             metrics.avg_latency_ms = total_latency / metrics.total_requests as f64;
             metrics.last_request_time = Some(chrono::Utc::now().to_rfc3339());
         }
@@ -299,9 +306,10 @@ impl MetricsCollector {
             } else {
                 metrics.failed_requests += 1;
             }
-            
+
             // 更新平均延迟
-            let total_latency = (metrics.avg_latency_ms * (metrics.total_requests - 1) as f64) + latency_ms as f64;
+            let total_latency =
+                (metrics.avg_latency_ms * (metrics.total_requests - 1) as f64) + latency_ms as f64;
             metrics.avg_latency_ms = total_latency / metrics.total_requests as f64;
         }
     }
@@ -378,7 +386,7 @@ impl MetricsCollector {
         self.error_count.store(0, Ordering::Relaxed);
         self.concurrent_requests.store(0, Ordering::Relaxed);
         self.max_concurrent_requests.store(0, Ordering::Relaxed);
-        
+
         *self.latency_stats.write().await = LatencyStats::default();
         self.provider_metrics.write().await.clear();
         self.model_metrics.write().await.clear();

@@ -339,12 +339,27 @@ pub async fn request_id_middleware(
     next: Next,
 ) -> Response {
     // Generate request ID if not present
-    if !request.headers().contains_key(REQUEST_ID_HEADER) {
+    let request_id = if !request.headers().contains_key(REQUEST_ID_HEADER) {
         let request_id = Uuid::new_v4().to_string();
         if let Ok(header_value) = HeaderValue::from_str(&request_id) {
             request.headers_mut().insert(REQUEST_ID_HEADER, header_value);
         }
+        request_id
+    } else {
+        // Get existing request ID
+        request.headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_else(|| "unknown")
+            .to_string()
+    };
+
+    let mut response = next.run(request).await;
+
+    // Add request ID to response headers
+    if let Ok(header_value) = HeaderValue::from_str(&request_id) {
+        response.headers_mut().insert(REQUEST_ID_HEADER, header_value);
     }
 
-    next.run(request).await
+    response
 }

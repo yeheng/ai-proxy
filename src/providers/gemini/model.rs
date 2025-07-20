@@ -1,12 +1,15 @@
+use crate::errors::AppError;
+use crate::providers::anthropic::{
+    AnthropicRequest, AnthropicResponse, AnthropicStreamEvent, ContentBlockStart, MessageDelta,
+    StreamMessage, TextDelta, Usage,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::errors::AppError;
-use crate::providers::anthropic::{AnthropicRequest, AnthropicResponse, AnthropicStreamEvent, StreamMessage, ContentBlockStart, TextDelta, MessageDelta, Usage};
 
 // Gemini-specific data structures for API communication
 
 /// Gemini API request structure
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct GeminiRequest {
     pub contents: Vec<GeminiContent>,
     #[serde(rename = "generationConfig")]
@@ -22,20 +25,20 @@ pub struct GeminiRequest {
 }
 
 /// Content structure for Gemini messages
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GeminiContent {
     pub role: String,
     pub parts: Vec<GeminiPart>,
 }
 
 /// Part structure containing text content
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GeminiPart {
     pub text: String,
 }
 
 /// Generation configuration for Gemini API
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Debug, Deserialize, Clone)]
 pub struct GenerationConfig {
     #[serde(rename = "maxOutputTokens")]
     pub max_output_tokens: u32,
@@ -179,16 +182,15 @@ pub struct GeminiError {
     pub details: Option<Vec<serde_json::Value>>,
 }
 
-
 /// Tool definition for function calling
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Tool {
     #[serde(rename = "functionDeclarations")]
     pub function_declarations: Vec<FunctionDeclaration>,
 }
 
 /// Function declaration within a tool
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FunctionDeclaration {
     pub name: String,
     pub description: String,
@@ -197,7 +199,7 @@ pub struct FunctionDeclaration {
 }
 
 /// Schema for function parameters
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Schema {
     #[serde(rename = "type")]
     pub type_field: String,
@@ -208,7 +210,7 @@ pub struct Schema {
 }
 
 /// Individual property within a schema
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SchemaProperty {
     #[serde(rename = "type")]
     pub type_field: String,
@@ -221,14 +223,14 @@ pub struct SchemaProperty {
 }
 
 /// Tool configuration for controlling function calling
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolConfig {
     #[serde(rename = "functionCallingConfig")]
     pub function_calling_config: FunctionCallingConfig,
 }
 
 /// Function calling configuration
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FunctionCallingConfig {
     pub mode: FunctionCallingMode,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -236,7 +238,7 @@ pub struct FunctionCallingConfig {
 }
 
 /// Function calling modes
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FunctionCallingMode {
     FunctionCallingModeUnspecified,
@@ -287,9 +289,10 @@ impl GeminiRequest {
                     "user" => "user",
                     "assistant" => "model", // Gemini uses "model" instead of "assistant"
                     _ => {
-                        return Err(AppError::ValidationError(
-                            format!("Invalid role: {}", msg.role)
-                        ));
+                        return Err(AppError::ValidationError(format!(
+                            "Invalid role: {}",
+                            msg.role
+                        )));
                     }
                 };
 
@@ -392,20 +395,33 @@ impl GeminiRequest {
     }
 
     /// Set safety settings with custom thresholds
-    pub fn with_custom_safety_settings(mut self, settings: Vec<(HarmCategory, HarmBlockThreshold)>) -> Self {
+    pub fn with_custom_safety_settings(
+        mut self,
+        settings: Vec<(HarmCategory, HarmBlockThreshold)>,
+    ) -> Self {
         self.safety_settings = Some(
             settings
                 .into_iter()
-                .map(|(category, threshold)| SafetySetting { category, threshold })
+                .map(|(category, threshold)| SafetySetting {
+                    category,
+                    threshold,
+                })
                 .collect(),
         );
         self
     }
 
     /// Add a single safety setting
-    pub fn with_safety_setting(mut self, category: HarmCategory, threshold: HarmBlockThreshold) -> Self {
+    pub fn with_safety_setting(
+        mut self,
+        category: HarmCategory,
+        threshold: HarmBlockThreshold,
+    ) -> Self {
         let mut settings = self.safety_settings.unwrap_or_default();
-        settings.push(SafetySetting { category, threshold });
+        settings.push(SafetySetting {
+            category,
+            threshold,
+        });
         self.safety_settings = Some(settings);
         self
     }
@@ -414,53 +430,73 @@ impl GeminiRequest {
     pub fn validate(&self) -> Result<(), AppError> {
         // Validate contents
         if self.contents.is_empty() {
-            return Err(AppError::ValidationError("Contents cannot be empty".to_string()));
+            return Err(AppError::ValidationError(
+                "Contents cannot be empty".to_string(),
+            ));
         }
 
         if self.contents.len() > 100 {
-            return Err(AppError::ValidationError("Too many contents (max 100)".to_string()));
+            return Err(AppError::ValidationError(
+                "Too many contents (max 100)".to_string(),
+            ));
         }
 
         // Validate generation config
         if self.generation_config.max_output_tokens == 0 {
-            return Err(AppError::ValidationError("max_output_tokens must be greater than 0".to_string()));
+            return Err(AppError::ValidationError(
+                "max_output_tokens must be greater than 0".to_string(),
+            ));
         }
 
         if self.generation_config.max_output_tokens > 8192 {
-            return Err(AppError::ValidationError("max_output_tokens cannot exceed 8192".to_string()));
+            return Err(AppError::ValidationError(
+                "max_output_tokens cannot exceed 8192".to_string(),
+            ));
         }
 
         // Validate temperature
         if let Some(temp) = self.generation_config.temperature {
             if temp.is_nan() || temp.is_infinite() {
-                return Err(AppError::ValidationError("temperature must be a valid number".to_string()));
+                return Err(AppError::ValidationError(
+                    "temperature must be a valid number".to_string(),
+                ));
             }
             if temp < 0.0 || temp > 2.0 {
-                return Err(AppError::ValidationError("temperature must be between 0.0 and 2.0".to_string()));
+                return Err(AppError::ValidationError(
+                    "temperature must be between 0.0 and 2.0".to_string(),
+                ));
             }
         }
 
         // Validate top_p
         if let Some(top_p) = self.generation_config.top_p {
             if top_p.is_nan() || top_p.is_infinite() {
-                return Err(AppError::ValidationError("top_p must be a valid number".to_string()));
+                return Err(AppError::ValidationError(
+                    "top_p must be a valid number".to_string(),
+                ));
             }
             if top_p < 0.0 || top_p > 1.0 {
-                return Err(AppError::ValidationError("top_p must be between 0.0 and 1.0".to_string()));
+                return Err(AppError::ValidationError(
+                    "top_p must be between 0.0 and 1.0".to_string(),
+                ));
             }
         }
 
         // Validate top_k
         if let Some(top_k) = self.generation_config.top_k {
             if top_k < 1 || top_k > 40 {
-                return Err(AppError::ValidationError("top_k must be between 1 and 40".to_string()));
+                return Err(AppError::ValidationError(
+                    "top_k must be between 1 and 40".to_string(),
+                ));
             }
         }
 
         // Validate candidate count
         if let Some(candidate_count) = self.generation_config.candidate_count {
             if candidate_count < 1 || candidate_count > 8 {
-                return Err(AppError::ValidationError("candidate_count must be between 1 and 8".to_string()));
+                return Err(AppError::ValidationError(
+                    "candidate_count must be between 1 and 8".to_string(),
+                ));
             }
         }
 
@@ -509,7 +545,10 @@ impl GeminiResponse {
                 if rating.blocked.unwrap_or(false) {
                     return Err(AppError::ProviderError {
                         status: 400,
-                        message: format!("Response blocked by safety filter: {:?}", rating.category),
+                        message: format!(
+                            "Response blocked by safety filter: {:?}",
+                            rating.category
+                        ),
                     });
                 }
             }
@@ -610,8 +649,10 @@ impl GeminiResponse {
             }
             if let Some(ratings) = &feedback.safety_ratings {
                 for rating in ratings {
-                    safety_info.push(format!("Prompt safety: {:?} ({:?})", 
-                        rating.category, rating.probability));
+                    safety_info.push(format!(
+                        "Prompt safety: {:?} ({:?})",
+                        rating.category, rating.probability
+                    ));
                 }
             }
         }
@@ -620,8 +661,10 @@ impl GeminiResponse {
             if let Some(ratings) = &candidate.safety_ratings {
                 for rating in ratings {
                     let blocked = rating.blocked.unwrap_or(false);
-                    safety_info.push(format!("Candidate {}: {:?} ({:?}) blocked: {}", 
-                        i, rating.category, rating.probability, blocked));
+                    safety_info.push(format!(
+                        "Candidate {}: {:?} ({:?}) blocked: {}",
+                        i, rating.category, rating.probability, blocked
+                    ));
                 }
             }
         }
@@ -650,26 +693,29 @@ impl GeminiResponse {
     /// Get all safety ratings across all candidates
     pub fn get_all_safety_ratings(&self) -> Vec<&SafetyRating> {
         let mut ratings = Vec::new();
-        
+
         for candidate in &self.candidates {
             if let Some(candidate_ratings) = &candidate.safety_ratings {
                 ratings.extend(candidate_ratings);
             }
         }
-        
+
         if let Some(feedback) = &self.prompt_feedback {
             if let Some(feedback_ratings) = &feedback.safety_ratings {
                 ratings.extend(feedback_ratings);
             }
         }
-        
+
         ratings
     }
 }
 
 impl GeminiStreamResponse {
     /// Convert Gemini streaming response to Anthropic streaming events
-    pub fn to_anthropic_events(&self, _model: &str, _message_id: &str
+    pub fn to_anthropic_events(
+        &self,
+        _model: &str,
+        _message_id: &str,
     ) -> Result<Vec<AnthropicStreamEvent>, AppError> {
         let mut events = Vec::new();
 
@@ -783,7 +829,7 @@ pub mod gemini_utils {
             role: "user".to_string(),
             parts: vec![GeminiPart { text: content }],
         };
-        
+
         GeminiRequest::new(vec![gemini_content], max_tokens)
     }
 
@@ -847,7 +893,10 @@ pub mod gemini_utils {
                     }
                 };
 
-                Ok(SafetySetting { category, threshold })
+                Ok(SafetySetting {
+                    category,
+                    threshold,
+                })
             })
             .collect()
     }

@@ -288,6 +288,31 @@ impl ProviderRegistry {
         &self.model_mapping
     }
 
+    /// 根据模型名称获取对应的提供商（返回Option）
+    ///
+    /// ## 功能说明
+    /// 通过模型名称查找并返回能够处理该模型的AI提供商实例，返回Option类型便于测试
+    ///
+    /// ## 内部实现逻辑
+    /// 调用get_provider_for_model方法，将Result转换为Option
+    ///
+    /// ## 参数说明
+    /// - `model`: 要查找的模型名称，如"gpt-4"、"claude-3-sonnet"等
+    ///
+    /// ## 执行例子
+    /// ```rust
+    /// if let Some(provider) = registry.get_provider("gpt-4") {
+    ///     // 使用provider
+    /// }
+    /// ```
+    ///
+    /// ## 返回值
+    /// - `Some(Arc<dyn AIProvider>)`: 找到的提供商实例
+    /// - `None`: 未找到支持该模型的提供商
+    pub fn get_provider(&self, model: &str) -> Option<Arc<dyn AIProvider + Send + Sync>> {
+        self.get_provider_for_model(model).ok()
+    }
+
     /// 刷新所有提供商的模型列表并更新模型映射
     ///
     /// ## 功能说明

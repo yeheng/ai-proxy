@@ -282,21 +282,72 @@ impl AIProvider for OpenAIProvider {
         let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
         let model_name = request.model.clone();
         
+        // Create initial streaming events
+        let initial_events = {
+            use crate::providers::anthropic::{AnthropicStreamEvent, StreamMessage, ContentBlockStart, Usage};
+
+            let mut events = Vec::new();
+
+            // Message start event
+            let message_start = AnthropicStreamEvent::MessageStart {
+                message: StreamMessage {
+                    id: message_id.clone(),
+                    model: model_name.clone(),
+                    role: "assistant".to_string(),
+                    content: vec![],
+                    usage: Usage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                },
+            };
+            if let Ok(json) = serde_json::to_string(&message_start) {
+                events.push(format!("event: message_start\ndata: {}\n\n", json));
+            }
+
+            // Content block start event
+            let content_start = AnthropicStreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlockStart {
+                    type_field: "text".to_string(),
+                    text: "".to_string(),
+                },
+            };
+            if let Ok(json) = serde_json::to_string(&content_start) {
+                events.push(format!("event: content_block_start\ndata: {}\n\n", json));
+            }
+
+            events.join("")
+        };
+
+        // Clone initial events for use in the closure
+        let initial_events_clone = initial_events.clone();
+
         // Process streaming bytes and convert to SSE events
         let sse_stream = body
             .enumerate()
             .filter_map(move |(chunk_index, chunk_result)| {
                 let message_id = message_id.clone();
                 let model_name = model_name.clone();
-                
+                let initial_events = initial_events_clone.clone();
+
                 async move {
                     match chunk_result {
                         Ok(bytes) => {
                             // Convert bytes to string
                             let chunk_str = String::from_utf8_lossy(&bytes);
-                            
+
+                            // Debug: Log the raw chunk
+                            tracing::debug!("OpenAI streaming chunk {}: {}", chunk_index, chunk_str);
+
                             // Process Server-Sent Events from OpenAI
                             let mut sse_events = Vec::new();
+
+                            // Add initial events for the first chunk
+                            if chunk_index == 0 {
+                                sse_events.push(initial_events);
+                            }
+
                             let lines: Vec<&str> = chunk_str.lines().collect();
                             
                             for (line_index, line) in lines.iter().enumerate() {
@@ -393,8 +444,11 @@ impl AIProvider for OpenAIProvider {
                             }
                             
                             if !sse_events.is_empty() {
-                                Some(Ok(sse_events.join("")))
+                                let result = sse_events.join("");
+                                tracing::debug!("OpenAI streaming result for chunk {}: {}", chunk_index, result);
+                                Some(Ok(result))
                             } else {
+                                tracing::debug!("OpenAI streaming chunk {} produced no events", chunk_index);
                                 None
                             }
                         }

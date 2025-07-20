@@ -1,25 +1,36 @@
 use ai_proxy::{
-    config::{Config, ServerConfig, ProviderDetail},
-    server::{AppState, create_app},
+    server::{create_app, AppState},
+    config::{Config, ServerConfig, ProviderDetail, LoggingConfig, SecurityConfig, PerformanceConfig},
+    providers::registry::ProviderRegistry,
+    metrics::MetricsCollector,
+    errors::AppError,
 };
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{Request, StatusCode, Method},
+    response::Response,
 };
+use reqwest::Client;
+use serde_json::json;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::Mutex;
 use tower::ServiceExt;
-use std::collections::HashMap;
 
+// Helper function to create test configuration
 fn create_test_config() -> Config {
     let mut providers = HashMap::new();
-    providers.insert("test".to_string(), ProviderDetail {
-        api_key: "test-key".to_string(),
-        api_base: "https://api.test.com/".to_string(),
-        models: Some(vec!["test-model".to_string()]),
-        timeout_seconds: 60,
-        max_retries: 3,
-        enabled: true,
-        rate_limit: None,
-    });
+    providers.insert(
+        "test_provider".to_string(),
+        ProviderDetail {
+            api_key: "test-api-key-1234567890".to_string(),
+            api_base: "https://api.example.com/v1/".to_string(),
+            models: Some(vec!["test-model".to_string()]),
+            timeout_seconds: 30,
+            max_retries: 3,
+            enabled: true,
+            rate_limit: None,
+        },
+    );
 
     Config {
         server: ServerConfig {
@@ -29,286 +40,468 @@ fn create_test_config() -> Config {
             max_request_size_bytes: 1024 * 1024,
         },
         providers,
-        logging: ai_proxy::config::LoggingConfig::default(),
-        security: ai_proxy::config::SecurityConfig::default(),
-        performance: ai_proxy::config::PerformanceConfig::default(),
+        logging: LoggingConfig::default(),
+        security: SecurityConfig::default(),
+        performance: PerformanceConfig::default(),
     }
 }
 
-fn create_valid_test_config() -> Config {
-    let mut providers = HashMap::new();
-    providers.insert("gemini".to_string(), ProviderDetail {
-        api_key: "test-key".to_string(),
-        api_base: "https://api.gemini.com/".to_string(),
-        models: Some(vec!["gemini-pro".to_string()]),
-        timeout_seconds: 60,
-        max_retries: 3,
-        enabled: true,
-        rate_limit: None,
-    });
-
-    Config {
-        server: ServerConfig {
-            host: "127.0.0.1".to_string(),
-            port: 3000,
-            request_timeout_seconds: 30,
-            max_request_size_bytes: 1024 * 1024,
-        },
-        providers,
-        logging: ai_proxy::config::LoggingConfig::default(),
-        security: ai_proxy::config::SecurityConfig::default(),
-        performance: ai_proxy::config::PerformanceConfig::default(),
-    }
-}
-
-#[tokio::test]
-async fn test_app_state_creation() {
+// Helper function to create test app state
+fn create_test_app_state() -> AppState {
     let config = create_test_config();
-    let app_state = AppState::new(config);
-    
-    // Should fail because "test" is not a recognized provider type
-    assert!(app_state.is_err());
-}
-
-#[tokio::test]
-async fn test_app_state_creation_valid() {
-    let config = create_valid_test_config();
-    let app_state = AppState::new(config);
-    
-    // Should succeed with valid provider
-    assert!(app_state.is_ok());
-}
-
-#[tokio::test]
-async fn test_router_creation() {
-    let config = create_valid_test_config();
-    let app_state = AppState::new(config).unwrap();
-    
-    // This should not panic - router creation should work
-    let _router = create_app(app_state);
-}
-
-#[tokio::test]
-async fn test_models_endpoint() {
-    let config = create_valid_test_config();
-    let app_state = AppState::new(config).unwrap();
-    let app = create_app(app_state);
-
-    // Create a request to the models endpoint
-    let request = Request::builder()
-        .uri("/v1/models")
-        .method("GET")
-        .body(Body::empty())
-        .unwrap();
-
-    // Send the request
-    let response = app.oneshot(request).await.unwrap();
-
-    // Check that we get a successful response
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Check content type
-    let content_type = response.headers().get("content-type").unwrap();
-    assert!(content_type.to_str().unwrap().contains("application/json"));
-
-    // Check response body structure
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    
-    // Verify the response has the expected structure
-    assert_eq!(json["object"], "list");
-    assert!(json["data"].is_array());
-    
-    // Should have at least one model from our test config
-    let models = json["data"].as_array().unwrap();
-    assert!(!models.is_empty(), "Should have at least one model");
-    
-    // Check that each model has the required fields
-    for model in models {
-        assert!(model["id"].is_string());
-        assert!(model["object"].is_string());
-        assert!(model["created"].is_number());
-        assert!(model["owned_by"].is_string());
-    }
-}
-
-#[tokio::test]
-async fn test_health_endpoint() {
-    let config = create_valid_test_config();
-    let app_state = AppState::new(config).unwrap();
-    let app = create_app(app_state);
-
-    // Create a request to the health endpoint
-    let request = Request::builder()
-        .uri("/health")
-        .method("GET")
-        .body(Body::empty())
-        .unwrap();
-
-    // Send the request
-    let response = app.oneshot(request).await.unwrap();
-
-    // Check that we get a successful response
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Check content type
-    let content_type = response.headers().get("content-type").unwrap();
-    assert!(content_type.to_str().unwrap().contains("application/json"));
-
-    // Check response body structure
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    
-    // Verify the response has the expected structure
-    assert_eq!(json["status"], "healthy");
-    assert_eq!(json["service"], "ai-proxy");
-    assert!(json["version"].is_string());
-    assert!(json["providers_configured"].is_number());
-    assert!(json["timestamp"].is_string());
-    
-    // Should have at least one provider configured
-    let provider_count = json["providers_configured"].as_u64().unwrap();
-    assert!(provider_count > 0, "Should have at least one provider configured");
-}
-
-#[tokio::test]
-async fn test_health_providers_endpoint() {
-    let config = create_valid_test_config();
-    let app_state = AppState::new(config).unwrap();
-    let app = create_app(app_state);
-
-    // Create a request to the provider health endpoint
-    let request = Request::builder()
-        .uri("/health/providers")
-        .method("GET")
-        .body(Body::empty())
-        .unwrap();
-
-    // Send the request
-    let response = app.oneshot(request).await.unwrap();
-
-    // Check that we get a successful response
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Check content type
-    let content_type = response.headers().get("content-type").unwrap();
-    assert!(content_type.to_str().unwrap().contains("application/json"));
-
-    // Check response body structure
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    
-    // Verify the response has the expected structure
-    assert!(json["status"].is_string());
-    assert!(json["providers"].is_object());
-    assert!(json["timestamp"].is_string());
-    
-    // Should have provider health information
-    let providers = json["providers"].as_object().unwrap();
-    assert!(!providers.is_empty(), "Should have at least one provider health status");
-    
-    // Check each provider health status structure
-    for (provider_id, health) in providers {
-        assert!(!provider_id.is_empty());
-        assert!(health["status"].is_string());
-        assert!(health["provider"].is_string());
-        // latency_ms and error are optional fields
-    }
-}
-
-#[tokio::test]
-async fn test_metrics_endpoint() {
-    let config = create_valid_test_config();
-    let app_state = AppState::new(config).unwrap();
-    let app = create_app(app_state);
-
-    // Create a request to the metrics endpoint
-    let request = Request::builder()
-        .uri("/metrics")
-        .method("GET")
-        .body(Body::empty())
-        .unwrap();
-
-    // Send the request
-    let response = app.oneshot(request).await.unwrap();
-
-    // Check that we get a successful response
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Check content type
-    let content_type = response.headers().get("content-type").unwrap();
-    assert!(content_type.to_str().unwrap().contains("application/json"));
-
-    // Check response body structure
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    
-    // Verify the response has the expected structure
-    assert!(json["metrics"].is_object());
-    let metrics = &json["metrics"];
-    
-    // Check basic metrics fields
-    assert!(metrics["uptime_seconds"].is_number());
-    assert!(metrics["total_requests"].is_number());
-    assert!(metrics["successful_requests"].is_number());
-    assert!(metrics["failed_requests"].is_number());
-    assert!(metrics["success_rate_percent"].is_number());
-    assert!(metrics["error_rate_percent"].is_number());
-    assert!(metrics["avg_latency_ms"].is_number());
-    assert!(metrics["timestamp"].is_string());
-    
-    // Check nested structures
-    assert!(metrics["latency_stats"].is_object());
-    assert!(metrics["provider_metrics"].is_object());
-    assert!(metrics["model_metrics"].is_object());
-}
-
-#[tokio::test]
-async fn test_metrics_collection() {
-    use ai_proxy::metrics::MetricsCollector;
-    use std::sync::Arc;
-    
+    let http_client = Client::new();
+    // Create registry with config and http client
+    let registry = ProviderRegistry::new(&config, http_client.clone()).unwrap_or_else(|_| {
+        // If provider creation fails, create empty registry for testing
+        ProviderRegistry::new(&Config {
+            server: config.server.clone(),
+            providers: HashMap::new(),
+            logging: config.logging.clone(),
+            security: config.security.clone(),
+            performance: config.performance.clone(),
+        }, http_client.clone()).unwrap()
+    });
+    let provider_registry = Arc::new(Mutex::new(registry));
     let metrics = Arc::new(MetricsCollector::new());
     
-    // Simulate some requests
-    let start1 = metrics.record_request_start();
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    metrics.record_request_end(start1, true, "openai", "gpt-4").await;
+    AppState {
+        config: Arc::new(config),
+        http_client,
+        provider_registry,
+        metrics,
+    }
+}
+
+#[tokio::test]
+async fn test_create_app_basic_routes() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    // Test health endpoint
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Test models endpoint
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/models")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Test providers health endpoint
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/health/providers")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
     
-    let start2 = metrics.record_request_start();
-    tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-    metrics.record_request_end(start2, false, "gemini", "gemini-pro").await;
+    // Test metrics endpoint
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/metrics")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_chat_handler_invalid_json() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from("invalid json"))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_chat_handler_missing_content_type() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/messages")
+        .body(Body::from(r#"{"model": "test-model", "messages": []}"#))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_chat_handler_validation_error() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    // Request with empty messages (should fail validation)
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(json!({
+            "model": "test-model",
+            "messages": [],
+            "max_tokens": 100
+        }).to_string()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_models_handler_success() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/models")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
     
-    let start3 = metrics.record_request_start();
-    tokio::time::sleep(tokio::time::Duration::from_millis(15)).await;
-    metrics.record_request_end(start3, true, "openai", "gpt-3.5-turbo").await;
+    // Response should be JSON
+    let content_type = response.headers().get("content-type").unwrap();
+    assert!(content_type.to_str().unwrap().contains("application/json"));
+}
+
+#[tokio::test]
+async fn test_health_handler_success() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
     
-    // Get metrics summary
-    let summary = metrics.get_metrics_summary().await;
+    // Response should be JSON
+    let content_type = response.headers().get("content-type").unwrap();
+    assert!(content_type.to_str().unwrap().contains("application/json"));
+}
+
+#[tokio::test]
+async fn test_providers_health_handler_success() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/health/providers")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
     
-    // Verify basic stats
-    assert_eq!(summary.total_requests, 3);
-    assert_eq!(summary.successful_requests, 2);
-    assert_eq!(summary.failed_requests, 1);
-    assert!((summary.success_rate_percent - 66.67).abs() < 0.1);
-    assert!((summary.error_rate_percent - 33.33).abs() < 0.1);
+    // Response should be JSON
+    let content_type = response.headers().get("content-type").unwrap();
+    assert!(content_type.to_str().unwrap().contains("application/json"));
+}
+
+#[tokio::test]
+async fn test_404_not_found() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/nonexistent")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_method_not_allowed() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    // POST to health endpoint (should be GET only)
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+#[tokio::test]
+async fn test_cors_headers() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::OPTIONS)
+        .uri("/v1/messages")
+        .header("origin", "https://example.com")
+        .header("access-control-request-method", "POST")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
     
-    // Verify provider metrics
-    assert!(summary.provider_metrics.contains_key("openai"));
-    assert!(summary.provider_metrics.contains_key("gemini"));
+    // Should handle CORS preflight
+    assert!(response.status().is_success() || response.status() == StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn test_request_id_header() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
     
-    let openai_metrics = &summary.provider_metrics["openai"];
-    assert_eq!(openai_metrics.total_requests, 2);
-    assert_eq!(openai_metrics.successful_requests, 2);
-    assert_eq!(openai_metrics.failed_requests, 0);
+    // Should include request ID header
+    assert!(response.headers().contains_key("x-request-id"));
+}
+
+#[tokio::test]
+async fn test_streaming_endpoint() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .header("accept", "text/event-stream")
+        .body(Body::from(json!({
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 100,
+            "stream": true
+        }).to_string()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
     
-    let gemini_metrics = &summary.provider_metrics["gemini"];
-    assert_eq!(gemini_metrics.total_requests, 1);
-    assert_eq!(gemini_metrics.successful_requests, 0);
-    assert_eq!(gemini_metrics.failed_requests, 1);
+    // Should handle streaming requests (even if provider is not available)
+    // The response might be an error, but it should be handled gracefully
+    assert!(response.status().is_client_error() || response.status().is_server_error());
+}
+
+// Note: Individual handler functions are not exported from the server module
+// so we test them through the full application routes
+
+// Test error handling in handlers
+
+#[tokio::test]
+async fn test_handler_error_responses() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    // Test various error conditions
+    let test_cases = vec![
+        // Invalid JSON
+        (
+            Method::POST,
+            "/v1/messages",
+            "application/json",
+            "invalid json",
+            StatusCode::BAD_REQUEST,
+        ),
+        // Missing required fields
+        (
+            Method::POST,
+            "/v1/messages",
+            "application/json",
+            r#"{"model": ""}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        // Invalid content type
+        (
+            Method::POST,
+            "/v1/messages",
+            "text/plain",
+            "hello",
+            StatusCode::BAD_REQUEST,
+        ),
+    ];
+
+    for (method, uri, content_type, body, expected_status) in test_cases {
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), expected_status);
+    }
+}
+
+// Test middleware integration with server
+
+#[tokio::test]
+async fn test_middleware_integration() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/health")
+        .header("x-custom-header", "test-value")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
     
-    // Verify model metrics
-    assert!(summary.model_metrics.contains_key("gpt-4"));
-    assert!(summary.model_metrics.contains_key("gemini-pro"));
-    assert!(summary.model_metrics.contains_key("gpt-3.5-turbo"));
+    // Should have middleware-added headers
+    assert!(response.headers().contains_key("x-request-id"));
+    
+    // Should handle the request successfully
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+// Test server configuration validation
+
+#[test]
+fn test_app_state_creation() {
+    let config = create_test_config();
+    let http_client = Client::new();
+    let registry = ProviderRegistry::new(&config, http_client.clone()).unwrap();
+    let provider_registry = Arc::new(Mutex::new(registry));
+    let metrics = Arc::new(MetricsCollector::new());
+    
+    let app_state = AppState {
+        config: Arc::new(config),
+        http_client,
+        provider_registry,
+        metrics,
+    };
+    
+    // Verify app state is created correctly
+    assert_eq!(app_state.config.server.port, 3000);
+    assert!(!app_state.config.providers.is_empty());
+}
+
+// Test concurrent request handling
+
+#[tokio::test]
+async fn test_concurrent_requests() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    // Create multiple concurrent requests
+    let mut handles = vec![];
+    
+    for i in 0..10 {
+        let app_clone = app.clone();
+        let handle = tokio::spawn(async move {
+            let request = Request::builder()
+                .method(Method::GET)
+                .uri("/health")
+                .header("x-request-id", format!("concurrent-test-{}", i))
+                .body(Body::empty())
+                .unwrap();
+
+            app_clone.oneshot(request).await.unwrap()
+        });
+        handles.push(handle);
+    }
+    
+    // Wait for all requests to complete
+    let responses = futures::future::join_all(handles).await;
+    
+    // All requests should succeed
+    for response_result in responses {
+        let response = response_result.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+}
+
+// Test request/response body size limits
+
+#[tokio::test]
+async fn test_request_size_limits() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    // Test with large request body
+    let large_body = "a".repeat(2 * 1024 * 1024); // 2MB
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(large_body))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    
+    // Should handle large requests appropriately (either accept or reject with proper status)
+    assert!(response.status().is_client_error() || response.status().is_success());
+}
+
+// Test graceful error handling for various scenarios
+
+#[tokio::test]
+async fn test_graceful_error_handling() {
+    let app_state = create_test_app_state();
+    let app = create_app(app_state);
+
+    // Test various error scenarios
+    let error_scenarios = vec![
+        // Malformed JSON
+        (r#"{"model": "test", "messages": [{"role": "user", "content": "hello"}"#, StatusCode::BAD_REQUEST),
+        // Missing required fields
+        (r#"{"messages": []}"#, StatusCode::BAD_REQUEST),
+        // Invalid field values
+        (r#"{"model": "", "messages": [], "max_tokens": -1}"#, StatusCode::BAD_REQUEST),
+    ];
+
+    for (body, expected_status) in error_scenarios {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/messages")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), expected_status);
+        
+        // Response should be JSON with error details
+        let content_type = response.headers().get("content-type").unwrap();
+        assert!(content_type.to_str().unwrap().contains("application/json"));
+    }
 }

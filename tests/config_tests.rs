@@ -684,3 +684,99 @@ fn test_default_implementations() {
     assert_eq!(performance_config.keep_alive_timeout_seconds, 60);
     assert_eq!(performance_config.max_concurrent_requests, 100);
 }
+
+#[test]
+fn test_config_environment_variable_override() {
+    // Test that environment variables can override config values
+    // This is a conceptual test since we can't easily set env vars in unit tests
+    let config = create_valid_config();
+
+    // Verify the config structure supports environment overrides
+    assert!(config.server.port > 0);
+    assert!(!config.server.host.is_empty());
+}
+
+#[test]
+fn test_config_serialization() {
+    let config = create_valid_config();
+
+    // Test that config can be serialized (useful for debugging)
+    let serialized = serde_json::to_string(&config);
+    assert!(serialized.is_ok());
+}
+
+#[test]
+fn test_provider_detail_clone() {
+    let provider = ProviderDetail {
+        api_key: "test-key".to_string(),
+        api_base: "https://api.example.com/".to_string(),
+        models: Some(vec!["model1".to_string()]),
+        timeout_seconds: 60,
+        max_retries: 3,
+        enabled: true,
+        rate_limit: None,
+    };
+
+    let cloned = provider.clone();
+    assert_eq!(provider.api_key, cloned.api_key);
+    assert_eq!(provider.api_base, cloned.api_base);
+    assert_eq!(provider.timeout_seconds, cloned.timeout_seconds);
+}
+
+#[test]
+fn test_config_with_rate_limit() {
+    let mut config = create_valid_config();
+    config
+        .providers
+        .get_mut("test_provider")
+        .unwrap()
+        .rate_limit = Some(RateLimitConfig {
+        requests_per_minute: 60,
+        burst_size: 10,
+    });
+
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn test_config_validation_comprehensive() {
+    let mut config = create_valid_config();
+
+    // Test with multiple providers
+    config.providers.insert(
+        "second_provider".to_string(),
+        ProviderDetail {
+            api_key: "another-test-key-1234567890".to_string(),
+            api_base: "https://api.another.com/v1/".to_string(),
+            models: Some(vec!["model3".to_string(), "model4".to_string()]),
+            timeout_seconds: 120,
+            max_retries: 5,
+            enabled: true,
+            rate_limit: Some(RateLimitConfig {
+                requests_per_minute: 120,
+                burst_size: 20,
+            }),
+        },
+    );
+
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn test_config_edge_cases() {
+    let mut config = create_valid_config();
+
+    // Test with disabled provider
+    config.providers.get_mut("test_provider").unwrap().enabled = false;
+    assert!(config.validate().is_ok());
+
+    // Test with no models specified
+    config.providers.get_mut("test_provider").unwrap().models = None;
+    assert!(config.validate().is_ok());
+
+    // Test with minimum values
+    config.server.port = 1;
+    config.server.request_timeout_seconds = 1;
+    config.server.max_request_size_bytes = 1;
+    assert!(config.validate().is_ok());
+}

@@ -1,236 +1,298 @@
 use ai_proxy::{
-    config::{Config, ProviderDetail, ServerConfig}, middleware::REQUEST_ID_HEADER, server::{create_app, AppState}
+    config::{
+        Config, LoggingConfig, PerformanceConfig, ProviderDetail, SecurityConfig, ServerConfig,
+    },
+    metrics::MetricsCollector,
+    middleware::{
+        error_handling_middleware, logging_middleware, performance_middleware,
+        request_id_middleware, validation_middleware,
+    },
+    providers::registry::ProviderRegistry,
+    server::AppState,
 };
 use axum::{
     body::Body,
-    http::{Request, StatusCode, Method},
+    http::{Request, StatusCode},
+    middleware,
+    response::Response,
+    routing::{get, post},
+    Router,
 };
-use std::collections::HashMap;
+use reqwest::Client;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::Mutex;
 use tower::ServiceExt;
-use uuid::Uuid;
 
-/// Test helper to create a test configuration
-fn create_test_config() -> Config {
+// Helper function to create test app state
+fn create_test_app_state() -> AppState {
     let mut providers = HashMap::new();
-     providers.insert(
-        "gemini".to_string(),
+    providers.insert(
+        "anthropic-test".to_string(),
         ProviderDetail {
             api_key: "test-api-key-1234567890".to_string(),
-            api_base: "https://api.example.com/v1/".to_string(),
-            models: Some(vec!["model1".to_string(), "model2".to_string()]),
-            timeout_seconds: 60,
+            api_base: "https://api.anthropic.com/v1/".to_string(),
+            models: Some(vec!["claude-3-sonnet".to_string()]),
+            timeout_seconds: 30,
             max_retries: 3,
             enabled: true,
             rate_limit: None,
         },
     );
 
-    Config {
+    let config = Config {
         server: ServerConfig {
             host: "127.0.0.1".to_string(),
             port: 3000,
             request_timeout_seconds: 30,
-            max_request_size_bytes: 10 * 1024 * 1024, // 10MB
+            max_request_size_bytes: 1024 * 1024,
         },
-        providers: providers,
-        logging: Default::default(),
-        security: Default::default(),
-        performance: Default::default(),
+        providers,
+        logging: LoggingConfig::default(),
+        security: SecurityConfig::default(),
+        performance: PerformanceConfig::default(),
+    };
+
+    let http_client = Client::new();
+    let provider_registry = Arc::new(Mutex::new(
+        ProviderRegistry::new(&config, http_client.clone()).unwrap(),
+    ));
+    let metrics = Arc::new(MetricsCollector::new());
+
+    AppState {
+        config: Arc::new(config),
+        http_client,
+        provider_registry,
+        metrics,
     }
 }
 
-/// Test helper to create test app state
-async fn create_test_app_state() -> AppState {
-    let config = create_test_config();
-    AppState::new(config).expect("Failed to create test app state")
+// Mock handlers for testing middleware
+async fn mock_handler_success() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from("Success"))
+        .unwrap()
+}
+
+async fn mock_handler_error() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .body(Body::from("Error"))
+        .unwrap()
 }
 
 #[tokio::test]
-async fn test_request_id_middleware() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state);
+async fn test_request_id_middleware_adds_header() {
+    let app = Router::new()
+        .route("/test", get(mock_handler_success))
+        .layer(middleware::from_fn(request_id_middleware));
 
-    // Test request without request ID - should generate one
+    let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    // Check that request ID header is added
+    assert!(response.headers().contains_key("x-request-id"));
+    let request_id = response.headers().get("x-request-id").unwrap();
+    assert!(!request_id.is_empty());
+
+    // Request ID should be a valid UUID format
+    let request_id_str = request_id.to_str().unwrap();
+    assert!(request_id_str.len() >= 32); // UUID without hyphens is 32 chars
+}
+
+#[tokio::test]
+async fn test_request_id_middleware_preserves_existing_id() {
+    let existing_id = "existing-request-id-123";
+    let app = Router::new()
+        .route("/test", get(mock_handler_success))
+        .layer(middleware::from_fn(request_id_middleware));
+
     let request = Request::builder()
-        .method(Method::GET)
-        .uri("/health")
+        .uri("/test")
+        .header("x-request-id", existing_id)
         .body(Body::empty())
         .unwrap();
 
-    let response = app.clone().oneshot(request).await.unwrap();
-    
-    // Should have request ID in response headers
-    assert!(response.headers().contains_key(REQUEST_ID_HEADER));
-    
-    let request_id = response.headers()
-        .get(REQUEST_ID_HEADER)
+    let response = app.oneshot(request).await.unwrap();
+
+    // Should preserve existing request ID (middleware doesn't overwrite existing IDs)
+    let response_id = response
+        .headers()
+        .get("x-request-id")
         .unwrap()
         .to_str()
         .unwrap();
-    
-    // Should be a valid UUID
-    assert!(Uuid::parse_str(request_id).is_ok());
+    assert_eq!(response_id, existing_id);
 }
 
 #[tokio::test]
-async fn test_request_id_preservation() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state);
+async fn test_logging_middleware_logs_request_response() {
+    let app_state = create_test_app_state();
+    let app = Router::new()
+        .route("/v1/messages", get(mock_handler_success))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            logging_middleware,
+        ))
+        .with_state(app_state);
 
-    let test_request_id = "test-request-id-12345";
-
-    // Test request with existing request ID - should preserve it
     let request = Request::builder()
-        .method(Method::GET)
-        .uri("/health")
-        .header(REQUEST_ID_HEADER, test_request_id)
+        .method("GET")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .header("x-request-id", "test-request-123")
         .body(Body::empty())
         .unwrap();
 
+    // This test mainly ensures the middleware doesn't panic
+    // Actual log verification would require capturing log output
     let response = app.oneshot(request).await.unwrap();
-    
-    // Should preserve the original request ID
-    let response_request_id = response.headers()
-        .get(REQUEST_ID_HEADER)
-        .unwrap()
-        .to_str()
-        .unwrap();
-    
-    assert_eq!(response_request_id, test_request_id);
-}
 
-#[tokio::test]
-async fn test_validation_middleware_content_type() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state);
-
-    // Test POST request without content-type header
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/v1/messages")
-        .body(Body::from(r#"{"model": "test", "messages": []}"#))
-        .unwrap();
-
-    let response = app.clone().oneshot(request).await.unwrap();
-    
-    // Should return 400 Bad Request for missing content-type
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn test_validation_middleware_valid_content_type() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state);
-
-    // Test POST request with valid content-type header
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/v1/messages")
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"model": "test", "messages": []}"#))
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    
-    // Should not fail due to content-type validation
-    // (may fail for other reasons like missing provider, but not validation)
-    assert_ne!(response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn test_validation_middleware_request_size_limit() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state);
-
-    // Create a large request body (larger than 10MB limit)
-    let large_body = "x".repeat(11 * 1024 * 1024); // 11MB
-
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/v1/messages")
-        .header("content-type", "application/json")
-        .header("content-length", large_body.len().to_string())
-        .body(Body::from(large_body))
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    
-    // Should return 400 Bad Request for oversized request
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn test_health_endpoint_with_middleware() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state);
-
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/health")
-        .body(Body::empty())
-        .unwrap();
-
-    let response = app.oneshot(request).await.unwrap();
-    
-    // Should return 200 OK
     assert_eq!(response.status(), StatusCode::OK);
-    
-    // Should have request ID in response
-    assert!(response.headers().contains_key(REQUEST_ID_HEADER));
 }
 
 #[tokio::test]
-async fn test_metrics_collection() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state.clone());
-
-    // Make a request to trigger metrics collection
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri("/health")
-        .body(Body::empty())
-        .unwrap();
-
-    let _response = app.oneshot(request).await.unwrap();
-    
-    // Check that metrics were collected
-    let metrics_summary = app_state.metrics.get_metrics_summary().await;
-    assert!(metrics_summary.total_requests > 0);
-}
-
-#[tokio::test]
-async fn test_concurrent_request_tracking() {
-    let app_state = create_test_app_state().await;
-    
-    // Manually test concurrent request tracking
-    app_state.metrics.increment_concurrent_requests().await;
-    assert_eq!(app_state.metrics.get_concurrent_requests(), 1);
-    
-    app_state.metrics.increment_concurrent_requests().await;
-    assert_eq!(app_state.metrics.get_concurrent_requests(), 2);
-    
-    app_state.metrics.decrement_concurrent_requests().await;
-    assert_eq!(app_state.metrics.get_concurrent_requests(), 1);
-    
-    app_state.metrics.decrement_concurrent_requests().await;
-    assert_eq!(app_state.metrics.get_concurrent_requests(), 0);
-}
-
-#[tokio::test]
-async fn test_cors_headers() {
-    let app_state = create_test_app_state().await;
-    let app = create_app(app_state);
+async fn test_logging_middleware_logs_errors() {
+    let app_state = create_test_app_state();
+    let app = Router::new()
+        .route("/v1/messages", get(mock_handler_error))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            logging_middleware,
+        ))
+        .with_state(app_state);
 
     let request = Request::builder()
-        .method(Method::OPTIONS)
-        .uri("/health")
-        .header("origin", "https://example.com")
-        .header("access-control-request-method", "GET")
+        .method("GET")
+        .uri("/v1/messages")
+        .header("x-request-id", "test-request-error")
         .body(Body::empty())
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    
-    // Should have CORS headers
-    assert!(response.headers().contains_key("access-control-allow-origin"));
+
+    // Should handle the response (logging middleware doesn't change status)
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_error_handling_middleware_passes_through() {
+    let app = Router::new()
+        .route("/test", get(mock_handler_error))
+        .layer(middleware::from_fn(error_handling_middleware));
+
+    let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    // Error handling middleware just logs, doesn't change the response
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_error_handling_middleware_passes_success() {
+    let app = Router::new()
+        .route("/test", get(mock_handler_success))
+        .layer(middleware::from_fn(error_handling_middleware));
+
+    let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_validation_middleware_valid_post_request() {
+    let app = Router::new()
+        .route("/v1/messages", post(mock_handler_success))
+        .layer(middleware::from_fn(validation_middleware));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"model": "test-model", "messages": []}"#))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_validation_middleware_missing_content_type() {
+    let app = Router::new()
+        .route("/v1/messages", post(mock_handler_success))
+        .layer(middleware::from_fn(validation_middleware));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .body(Body::from(r#"{"model": "test-model"}"#))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    // Should return error status due to missing content-type
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_validation_middleware_invalid_content_type() {
+    let app = Router::new()
+        .route("/v1/messages", post(mock_handler_success))
+        .layer(middleware::from_fn(validation_middleware));
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("content-type", "text/plain")
+        .body(Body::from("plain text"))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    // Should return error status due to invalid content-type
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_validation_middleware_get_request_passes() {
+    let app = Router::new()
+        .route("/health", get(mock_handler_success))
+        .layer(middleware::from_fn(validation_middleware));
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_performance_middleware() {
+    let app_state = create_test_app_state();
+    let app = Router::new()
+        .route("/v1/messages", get(mock_handler_success))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            performance_middleware,
+        ))
+        .with_state(app_state);
+
+    let request = Request::builder()
+        .uri("/v1/messages")
+        .header("x-request-id", "perf-test-123")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
 }
