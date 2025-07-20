@@ -46,7 +46,7 @@ fn create_test_request() -> AnthropicRequest {
 
 #[tokio::test]
 async fn test_anthropic_provider_creation() {
-    let provider = create_test_provider();
+    let _provider = create_test_provider();
     
     // Test that provider is created successfully
     // This is a basic test to ensure the struct is properly initialized
@@ -55,7 +55,7 @@ async fn test_anthropic_provider_creation() {
 
 #[tokio::test]
 async fn test_request_validation() {
-    let provider = create_test_provider();
+    let _provider = create_test_provider();
     
     // Test valid request
     let valid_request = create_test_request();
@@ -137,7 +137,7 @@ async fn test_error_handling() {
 
 #[tokio::test]
 async fn test_streaming_request_preparation() {
-    let provider = create_test_provider();
+    let _provider = create_test_provider();
     
     // Test that streaming requests are properly prepared
     let mut request = create_test_request();

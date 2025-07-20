@@ -132,7 +132,7 @@ impl AIProvider for GeminiProvider {
 
         // Build URL
         let url = format!(
-            "{}/{}:generateContent?key={}",
+            "{}/models/{}:generateContent?key={}",
             self.config.api_base.trim_end_matches('/'),
             request.model,
             self.config.api_key
@@ -185,7 +185,7 @@ impl AIProvider for GeminiProvider {
 
         // Build streaming URL
         let url = format!(
-            "{}/{}:streamGenerateContent?key={}",
+            "{}/models/{}:streamGenerateContent?key={}",
             self.config.api_base.trim_end_matches('/'),
             request.model,
             self.config.api_key

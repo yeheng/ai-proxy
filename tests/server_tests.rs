@@ -3,12 +3,10 @@ use ai_proxy::{
     config::{Config, ServerConfig, ProviderDetail, LoggingConfig, SecurityConfig, PerformanceConfig},
     providers::registry::ProviderRegistry,
     metrics::MetricsCollector,
-    errors::AppError,
 };
 use axum::{
     body::Body,
-    http::{Request, StatusCode, Method},
-    response::Response,
+    http::{Request, StatusCode, Method}
 };
 use reqwest::Client;
 use serde_json::json;

@@ -320,149 +320,133 @@ impl AIProvider for OpenAIProvider {
             events.join("")
         };
 
-        // Clone initial events for use in the closure
-        let initial_events_clone = initial_events.clone();
+        // Create a flag to track if initial events have been sent
+        let initial_events_sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         // Process streaming bytes and convert to SSE events
         let sse_stream = body
-            .enumerate()
-            .filter_map(move |(chunk_index, chunk_result)| {
+            .map(move |chunk_result| {
                 let message_id = message_id.clone();
-                let model_name = model_name.clone();
-                let initial_events = initial_events_clone.clone();
+                let _model_name = model_name.clone();
+                let initial_events_sent = initial_events_sent.clone();
 
-                async move {
-                    match chunk_result {
-                        Ok(bytes) => {
-                            // Convert bytes to string
-                            let chunk_str = String::from_utf8_lossy(&bytes);
+                match chunk_result {
+                    Ok(bytes) => {
+                        // Convert bytes to string
+                        let chunk_str = String::from_utf8_lossy(&bytes);
 
-                            // Debug: Log the raw chunk
-                            tracing::debug!("OpenAI streaming chunk {}: {}", chunk_index, chunk_str);
+                        // Debug: Log the raw chunk
+                        tracing::debug!("OpenAI streaming chunk: {}", chunk_str);
 
-                            // Process Server-Sent Events from OpenAI
-                            let mut sse_events = Vec::new();
+                        // Process Server-Sent Events from OpenAI
+                        let mut sse_events = Vec::new();
+                        
+                        // Send initial events only once, at the start of the stream
+                        if !initial_events_sent.load(std::sync::atomic::Ordering::Relaxed) {
+                            sse_events.push(initial_events.clone());
+                            initial_events_sent.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
 
-                            // Add initial events for the first chunk
-                            if chunk_index == 0 {
-                                sse_events.push(initial_events);
+                        let lines: Vec<&str> = chunk_str.lines().collect();
+                        
+                        for line in lines {
+                            // Skip empty lines and comments
+                            if line.trim().is_empty() || line.starts_with(':') {
+                                continue;
                             }
 
-                            let lines: Vec<&str> = chunk_str.lines().collect();
-                            
-                            for (line_index, line) in lines.iter().enumerate() {
-                                // Skip empty lines and comments
-                                if line.trim().is_empty() || line.starts_with(':') {
+                            // Parse SSE data lines
+                            if let Some(data) = line.strip_prefix("data: ") {
+                                // Check for end of stream
+                                if data.trim() == "[DONE]" {
+                                    // Add content block stop and message stop events
+                                    let content_stop = AnthropicStreamEvent::ContentBlockStop { index: 0 };
+                                    if let Ok(json) = serde_json::to_string(&content_stop) {
+                                        sse_events.push(format!("event: content_block_stop\ndata: {}\n\n", json));
+                                    }
+                                    
+                                    let message_stop = AnthropicStreamEvent::MessageStop;
+                                    if let Ok(json) = serde_json::to_string(&message_stop) {
+                                        sse_events.push(format!("event: message_stop\ndata: {}\n\n", json));
+                                    }
                                     continue;
                                 }
 
-                                // Parse SSE data lines
-                                if let Some(data) = line.strip_prefix("data: ") {
-                                    // Check for end of stream
-                                    if data.trim() == "[DONE]" {
-                                        // Add content block stop and message stop events
-                                        let content_stop = AnthropicStreamEvent::ContentBlockStop { index: 0 };
-                                        if let Ok(json) = serde_json::to_string(&content_stop) {
-                                            sse_events.push(format!("event: content_block_stop\ndata: {}\n\n", json));
-                                        }
+                                // Parse JSON data from OpenAI streaming response
+                                match serde_json::from_str::<OpenAIStreamResponse>(data) {
+                                    Ok(openai_stream) => {
                                         
-                                        let message_stop = AnthropicStreamEvent::MessageStop;
-                                        if let Ok(json) = serde_json::to_string(&message_stop) {
-                                            sse_events.push(format!("event: message_stop\ndata: {}\n\n", json));
-                                        }
-                                        continue;
-                                    }
-
-                                    // Parse JSON data from OpenAI streaming response
-                                    match serde_json::from_str::<OpenAIStreamResponse>(data) {
-                                        Ok(openai_stream) => {
-                                            // Add message start event if this is the first chunk
-                                            if chunk_index == 0 && line_index == 0 {
-                                                let start_event = OpenAIStreamResponse::create_message_start_event(&model_name, &message_id);
-                                                if let Ok(start_json) = serde_json::to_string(&start_event) {
-                                                    sse_events.push(format!("event: message_start\ndata: {}\n\n", start_json));
-                                                }
-                                                
-                                                // Add content block start event
-                                                let content_start_event = OpenAIStreamResponse::create_content_block_start_event();
-                                                if let Ok(content_json) = serde_json::to_string(&content_start_event) {
-                                                    sse_events.push(format!("event: content_block_start\ndata: {}\n\n", content_json));
-                                                }
-                                            }
-                                            
-                                            // Convert to Anthropic streaming events
-                                            match openai_stream.to_anthropic_events(&message_id) {
-                                                Ok(events) => {
-                                                    // Convert each event to SSE format
-                                                    for event in events {
-                                                        match event {
-                                                            AnthropicStreamEvent::ContentBlockDelta { .. } => {
-                                                                if let Ok(json) = serde_json::to_string(&event) {
-                                                                    sse_events.push(format!("event: content_block_delta\ndata: {}\n\n", json));
-                                                                }
+                                        // Convert to Anthropic streaming events
+                                        match openai_stream.to_anthropic_events(&message_id) {
+                                            Ok(events) => {
+                                                // Convert each event to SSE format
+                                                for event in events {
+                                                    match event {
+                                                        AnthropicStreamEvent::ContentBlockDelta { .. } => {
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("event: content_block_delta\ndata: {}\n\n", json));
                                                             }
-                                                            AnthropicStreamEvent::MessageDelta { .. } => {
-                                                                if let Ok(json) = serde_json::to_string(&event) {
-                                                                    sse_events.push(format!("event: message_delta\ndata: {}\n\n", json));
-                                                                }
+                                                        }
+                                                        AnthropicStreamEvent::MessageDelta { .. } => {
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("event: message_delta\ndata: {}\n\n", json));
                                                             }
-                                                            AnthropicStreamEvent::MessageStop => {
-                                                                // Add content block stop first
-                                                                let content_stop = AnthropicStreamEvent::ContentBlockStop { index: 0 };
-                                                                if let Ok(json) = serde_json::to_string(&content_stop) {
-                                                                    sse_events.push(format!("event: content_block_stop\ndata: {}\n\n", json));
-                                                                }
-                                                                
-                                                                // Then add message stop
-                                                                if let Ok(json) = serde_json::to_string(&event) {
-                                                                    sse_events.push(format!("event: message_stop\ndata: {}\n\n", json));
-                                                                }
+                                                        }
+                                                        AnthropicStreamEvent::MessageStop => {
+                                                            // Add content block stop first
+                                                            let content_stop = AnthropicStreamEvent::ContentBlockStop { index: 0 };
+                                                            if let Ok(json) = serde_json::to_string(&content_stop) {
+                                                                sse_events.push(format!("event: content_block_stop\ndata: {}\n\n", json));
                                                             }
-                                                            _ => {
-                                                                if let Ok(json) = serde_json::to_string(&event) {
-                                                                    sse_events.push(format!("data: {}\n\n", json));
-                                                                }
+                                                            
+                                                            // Then add message stop
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("event: message_stop\ndata: {}\n\n", json));
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            if let Ok(json) = serde_json::to_string(&event) {
+                                                                sse_events.push(format!("data: {}\n\n", json));
                                                             }
                                                         }
                                                     }
                                                 }
-                                                Err(e) => {
-                                                    tracing::error!("Failed to convert OpenAI stream to Anthropic events: {}", e);
-                                                    let error_event = OpenAIStreamResponse::create_error_event(&e);
-                                                    if let Ok(json) = serde_json::to_string(&error_event) {
-                                                        sse_events.push(format!("event: error\ndata: {}\n\n", json));
-                                                    }
+                                            }
+                                            Err(e) => {
+                                                tracing::error!("Failed to convert OpenAI stream to Anthropic events: {}", e);
+                                                let error_event = OpenAIStreamResponse::create_error_event(&e);
+                                                if let Ok(json) = serde_json::to_string(&error_event) {
+                                                    sse_events.push(format!("event: error\ndata: {}\n\n", json));
                                                 }
                                             }
                                         }
-                                        Err(parse_err) => {
-                                            tracing::warn!("Failed to parse OpenAI streaming response: {} - Error: {}", data, parse_err);
-                                            // Skip malformed data but continue streaming
-                                        }
+                                    }
+                                    Err(parse_err) => {
+                                        tracing::warn!("Failed to parse OpenAI streaming response: {} - Error: {}", data, parse_err);
+                                        // Skip malformed data but continue streaming
                                     }
                                 }
                             }
-                            
-                            if !sse_events.is_empty() {
-                                let result = sse_events.join("");
-                                tracing::debug!("OpenAI streaming result for chunk {}: {}", chunk_index, result);
-                                Some(Ok(result))
-                            } else {
-                                tracing::debug!("OpenAI streaming chunk {} produced no events", chunk_index);
-                                None
-                            }
                         }
-                        Err(e) => {
-                            tracing::error!("Error reading streaming response chunk: {}", e);
-                            let app_error = AppError::ProviderError {
-                                status: 500,
-                                message: format!("Streaming read error: {}", e),
-                            };
-                            Some(Err(app_error))
+                        
+                        if !sse_events.is_empty() {
+                            let result = sse_events.join("");
+                            Some(Ok(result))
+                        } else {
+                            None
                         }
                     }
+                    Err(e) => {
+                        tracing::error!("Error reading streaming response chunk: {}", e);
+                        let app_error = AppError::ProviderError {
+                            status: 500,
+                            message: format!("Streaming read error: {}", e),
+                        };
+                        Some(Err(app_error))
+                    }
                 }
-            });
+            })
+            .filter_map(|result| async move { result });
 
         tracing::info!("OpenAI streaming response initialized successfully");
         Ok(Box::pin(sse_stream))
