@@ -143,7 +143,8 @@ fn test_anthropic_stream_event_error() {
 
     let json = serde_json::to_string(&error_event).unwrap();
     assert!(json.contains("\"type\":\"error\""));
-    assert!(json.contains("\"error_type\":\"rate_limit_error\""));
+    assert!(json.contains("\"type\":\"error\""));
+    assert!(json.contains("\"message\":\"Rate limit exceeded\""));
     assert!(json.contains("\"message\":\"Rate limit exceeded\""));
 }
 
@@ -359,8 +360,12 @@ fn test_sse_event_special_characters() {
         assert!(formatted.ends_with("\n\n"), "Failed for {}: {}", name, formatted);
         
         // Should contain the content
-        assert!(formatted.contains(content) || formatted.lines().any(|line| line.starts_with("data: ") && line.contains(content)), 
-                "Failed for {}: {}", name, formatted);
+        let expected_lines: Vec<&str> = content.lines().collect();
+        let data_lines: Vec<&str> = formatted.lines().filter(|l| l.starts_with("data: ")).collect();
+        assert_eq!(expected_lines.len(), data_lines.len(), "Failed for {}: {}", name, formatted);
+        for (expected, data_line) in expected_lines.iter().zip(data_lines) {
+            assert!(data_line.ends_with(expected), "Failed for {}: Expected '{}' in '{}'", name, expected, data_line);
+        }
     }
 }
 

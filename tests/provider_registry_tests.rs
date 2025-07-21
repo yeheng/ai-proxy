@@ -9,7 +9,7 @@ use std::sync::Arc;
 fn create_test_config() -> Config {
     let mut providers = HashMap::new();
     providers.insert(
-        "test_openai".to_string(),
+        "openai".to_string(),
         ProviderDetail {
             api_key: "test-openai-key-1234567890".to_string(),
             api_base: "https://api.openai.com/v1/".to_string(),
@@ -21,7 +21,7 @@ fn create_test_config() -> Config {
         },
     );
     providers.insert(
-        "test_anthropic".to_string(),
+        "anthropic".to_string(),
         ProviderDetail {
             api_key: "test-anthropic-key-1234567890".to_string(),
             api_base: "https://api.anthropic.com/v1/".to_string(),
@@ -127,7 +127,7 @@ async fn test_provider_registry_disabled_provider() {
     let mut config = create_test_config();
 
     // Disable one provider
-    config.providers.get_mut("test_openai").unwrap().enabled = false;
+    config.providers.get_mut("openai").unwrap().enabled = false;
 
     let config = Arc::new(config);
     let http_client = reqwest::Client::new();
@@ -135,7 +135,10 @@ async fn test_provider_registry_disabled_provider() {
     let registry = ProviderRegistry::new(&config, http_client).unwrap();
 
     // Disabled provider's models should not be available
-    assert!(registry.get_provider("gpt-4").is_none());
+    // After disabling, provider should not be available
+    // Verify disabled provider's models are not available
+    let models = registry.list_all_models().await.unwrap();
+    assert!(!models.iter().any(|m| m.id == "gpt-4"));
 
     // Enabled provider's models should still be available
     assert!(registry.get_provider("claude-3-sonnet").is_some());
@@ -151,12 +154,13 @@ async fn test_provider_registry_empty_config() {
 
     let registry = ProviderRegistry::new(&config, http_client);
 
-    // Should handle empty provider config gracefully
-    assert!(registry.is_ok());
-
-    let registry = registry.unwrap();
-    let models = registry.list_all_models().await.unwrap();
-    assert!(models.is_empty());
+    // Empty provider config should return error
+    assert!(registry.is_err());
+    if let Err(e) = registry {
+        assert!(e.to_string().contains("No providers configured"));
+    } else {
+        panic!("Expected error when providers are empty");
+    }
 }
 
 #[tokio::test]

@@ -630,6 +630,66 @@ impl TestUtils {
             .unwrap()
     }
 
+    /// Create comprehensive test request with all parameters
+    pub fn create_comprehensive_request(
+        model: &str,
+        content: &str,
+        stream: bool,
+        max_tokens: u32,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+    ) -> AnthropicRequest {
+        AnthropicRequest {
+            model: model.to_string(),
+            messages: vec![Message::user(content.to_string())],
+            max_tokens,
+            stream: Some(stream),
+            temperature,
+            top_p,
+        }
+    }
+
+    /// Validate comprehensive response structure
+    pub fn validate_comprehensive_response(response_json: &Value, expected_model: &str) -> Result<(), String> {
+        // Check required fields
+        if response_json["model"] != expected_model {
+            return Err(format!("Model mismatch: expected {}, got {}", expected_model, response_json["model"]));
+        }
+
+        if !response_json["content"].is_array() {
+            return Err("Content should be an array".to_string());
+        }
+
+        if !response_json["usage"]["input_tokens"].is_number() {
+            return Err("Input tokens should be a number".to_string());
+        }
+
+        if !response_json["usage"]["output_tokens"].is_number() {
+            return Err("Output tokens should be a number".to_string());
+        }
+
+        if !response_json["id"].is_string() {
+            return Err("ID should be a string".to_string());
+        }
+
+        // Check content structure
+        let content_array = response_json["content"].as_array().unwrap();
+        if content_array.is_empty() {
+            return Err("Content array should not be empty".to_string());
+        }
+
+        for content_item in content_array {
+            if !content_item["type"].is_string() {
+                return Err("Content item should have type".to_string());
+            }
+            if !content_item["text"].is_string() {
+                return Err("Content item should have text".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
     /// Verify standard response format
     pub fn verify_standard_response(response_json: &Value, expected_model: &str) {
         assert_eq!(response_json["model"], expected_model);

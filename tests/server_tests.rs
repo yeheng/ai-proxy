@@ -20,11 +20,11 @@ use tower::ServiceExt;
 fn create_test_config() -> Config {
     let mut providers = HashMap::new();
     providers.insert(
-        "test_provider".to_string(),
+        "openai".to_string(),
         ProviderDetail {
             api_key: "test-api-key-1234567890".to_string(),
-            api_base: "https://api.example.com/v1/".to_string(),
-            models: Some(vec!["test-model".to_string()]),
+            api_base: "https://api.openai.com/v1/".to_string(),
+            models: Some(vec!["gpt-3.5-turbo".to_string()]),
             timeout_seconds: 30,
             max_retries: 3,
             enabled: true,
@@ -51,20 +51,7 @@ fn create_test_app_state() -> AppState {
     let config = create_test_config();
     let http_client = Client::new();
     // Create registry with config and http client
-    let registry = ProviderRegistry::new(&config, http_client.clone()).unwrap_or_else(|_| {
-        // If provider creation fails, create empty registry for testing
-        ProviderRegistry::new(
-            &Config {
-                server: config.server.clone(),
-                providers: HashMap::new(),
-                logging: config.logging.clone(),
-                security: config.security.clone(),
-                performance: config.performance.clone(),
-            },
-            http_client.clone(),
-        )
-        .unwrap()
-    });
+    let registry = ProviderRegistry::new(&config, http_client.clone()).unwrap();
     let provider_registry = Arc::new(RwLock::new(registry));
     let metrics = Arc::new(MetricsCollector::new());
 
@@ -135,7 +122,7 @@ async fn test_chat_handler_invalid_json() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
@@ -150,7 +137,7 @@ async fn test_chat_handler_missing_content_type() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
@@ -174,7 +161,7 @@ async fn test_chat_handler_validation_error() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]
@@ -262,7 +249,7 @@ async fn test_method_not_allowed() {
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

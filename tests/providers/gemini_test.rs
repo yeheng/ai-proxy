@@ -374,7 +374,11 @@ async fn test_gemini_provider_chat_conversion_error() {
     println!("Error: {:?}", result);
 
     if let Err(error) = result {
-        assert!(error.to_string().contains("Invalid role 'system': must be 'user' or 'assistant'"));
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid role 'system': must be 'user' or 'assistant'")
+        );
     }
 }
 
@@ -449,9 +453,9 @@ fn test_gemini_safety_info_logging() {
 
 #[test]
 fn test_gemini_utils_create_simple_request() {
-    use ai_proxy::providers::gemini::model::gemini_utils;
+    use ai_proxy::providers::gemini::utils::*;
 
-    let request = gemini_utils::create_simple_request("Hello Gemini".to_string(), 100);
+    let request = create_simple_request("Hello Gemini".to_string(), 100);
     assert_eq!(request.contents.len(), 1);
     assert_eq!(request.contents[0].role, "user");
     assert_eq!(request.contents[0].parts[0].text, "Hello Gemini");
@@ -460,7 +464,7 @@ fn test_gemini_utils_create_simple_request() {
 
 #[test]
 fn test_gemini_utils_create_conversation_request() {
-    use ai_proxy::providers::gemini::model::gemini_utils;
+    use ai_proxy::providers::gemini::utils::*;
 
     let messages = vec![
         ("user".to_string(), "Hello".to_string()),
@@ -468,7 +472,7 @@ fn test_gemini_utils_create_conversation_request() {
         ("user".to_string(), "How are you?".to_string()),
     ];
 
-    let request = gemini_utils::create_conversation_request(messages, 100).unwrap();
+    let request = create_conversation_request(messages, 100).unwrap();
     assert_eq!(request.contents.len(), 3);
     assert_eq!(request.contents[0].role, "user");
     assert_eq!(request.contents[1].role, "model"); // Gemini uses "model" for assistant
@@ -477,14 +481,14 @@ fn test_gemini_utils_create_conversation_request() {
 
 #[test]
 fn test_gemini_utils_parse_safety_settings() {
-    use ai_proxy::providers::gemini::model::gemini_utils;
+    use ai_proxy::providers::gemini::utils::*;
 
     let config = vec![
         ("harassment", "block_none"),
         ("hate_speech", "block_low_and_above"),
     ];
 
-    let settings = gemini_utils::parse_safety_settings(&config).unwrap();
+    let settings = parse_safety_settings(&config).unwrap();
     assert_eq!(settings.len(), 2);
     assert!(matches!(settings[0].category, HarmCategory::Harassment));
     assert!(matches!(
@@ -500,7 +504,7 @@ fn test_gemini_utils_parse_safety_settings() {
 
 #[test]
 fn test_gemini_utils_extract_text_content() {
-    use ai_proxy::providers::gemini::model::gemini_utils;
+    use ai_proxy::providers::gemini::utils::*;
 
     let response = GeminiResponse {
         candidates: vec![GeminiCandidate {
@@ -520,7 +524,7 @@ fn test_gemini_utils_extract_text_content() {
         error: None,
     };
 
-    let text = gemini_utils::extract_text_content(&response).unwrap();
+    let text = extract_text_content(&response).unwrap();
     assert_eq!(text, "Extracted content");
 }
 
@@ -583,11 +587,7 @@ async fn test_gemini_provider_chat_network_error() {
     assert!(result.is_err());
 
     if let Err(error) = result {
-        assert!(
-            error
-                .to_string()
-                .contains("Gemini API error")
-        );
+        assert!(error.to_string().contains("Gemini API error"));
     }
 }
 
@@ -643,8 +643,6 @@ async fn test_gemini_provider_list_models_success() {
 
     // Test the list_models method
     let models = provider.list_models().await.unwrap();
-
-
 
     // Verify response
     assert_eq!(models.len(), 3);
@@ -865,5 +863,10 @@ async fn test_gemini_provider_health_check_network_error() {
     assert!(health.error.is_some());
     // Network error should contain connection-related message
     let error_msg = health.error.unwrap();
-    assert!(error_msg.contains("error") || error_msg.contains("connection") || error_msg.contains("resolve") || error_msg.contains("HTTP"));
+    assert!(
+        error_msg.contains("error")
+            || error_msg.contains("connection")
+            || error_msg.contains("resolve")
+            || error_msg.contains("HTTP")
+    );
 }
