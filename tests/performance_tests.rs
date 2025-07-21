@@ -28,6 +28,8 @@ use tower::ServiceExt;
 
 use crate::integration_framework::IntegrationTestFramework;
 
+mod integration_framework;
+
 /// Performance test configuration
 #[derive(Debug, Clone)]
 pub struct PerformanceTestConfig {

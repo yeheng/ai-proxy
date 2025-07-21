@@ -1,292 +1,193 @@
 # AI Proxy Deployment Guide
 
-This guide covers various deployment options for the AI Proxy service, from development to production environments.
+This guide covers various deployment options for the AI Proxy service, from local development to production environments.
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Development Deployment](#development-deployment)
-- [Production Deployment](#production-deployment)
+- [Local Development](#local-development)
 - [Docker Deployment](#docker-deployment)
 - [Kubernetes Deployment](#kubernetes-deployment)
-- [Configuration Management](#configuration-management)
+- [Production Considerations](#production-considerations)
 - [Monitoring and Logging](#monitoring-and-logging)
-- [Security Considerations](#security-considerations)
-- [Performance Tuning](#performance-tuning)
+- [Security](#security)
 - [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
 ### System Requirements
 
-- **Operating System**: Linux, macOS, or Windows
-- **Memory**: Minimum 512MB RAM, recommended 2GB+ for production
-- **CPU**: 1+ cores, 2+ cores recommended for production
-- **Storage**: 100MB+ free space
-- **Network**: Internet access for AI provider APIs
+- **CPU**: 2+ cores recommended
+- **Memory**: 512MB minimum, 2GB+ recommended for production
+- **Storage**: 100MB for application, additional space for logs
+- **Network**: Outbound HTTPS access to AI provider APIs
 
-### Software Dependencies
+### Software Requirements
 
-- **Rust**: Version 1.70+ (for building from source)
-- **Docker**: Version 20.10+ (for containerized deployment)
-- **Kubernetes**: Version 1.20+ (for Kubernetes deployment)
+- **Rust**: 1.70+ (for building from source)
+- **Docker**: 20.10+ (for containerized deployment)
+- **Kubernetes**: 1.20+ (for Kubernetes deployment)
 
-## Development Deployment
+## Local Development
 
-### Quick Start
+### Building from Source
 
-1. **Clone and Build**
+1. **Clone the repository**:
    ```bash
    git clone <repository-url>
    cd ai-proxy
+   ```
+
+2. **Install Rust** (if not already installed):
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   source ~/.cargo/env
+   ```
+
+3. **Build the application**:
+   ```bash
+   # Debug build (faster compilation)
+   cargo build
+   
+   # Release build (optimized)
    cargo build --release
    ```
 
-2. **Configure**
+4. **Configure the application**:
    ```bash
    cp config.example.toml config.toml
    # Edit config.toml with your API keys
    ```
 
-3. **Run**
+5. **Run the application**:
    ```bash
+   # Debug mode
    cargo run
-   # Or use the binary
+   
+   # Release mode
    ./target/release/ai-proxy
+   
+   # With custom config
+   ./target/release/ai-proxy --config /path/to/config.toml
    ```
-
-### Development Configuration
-
-```toml
-# config.toml for development
-[server]
-host = "127.0.0.1"
-port = 3000
-
-[logging]
-level = "debug"
-format = "pretty"
-
-[providers.openai]
-api_key = "your-openai-key"
-api_base = "https://api.openai.com/v1/"
-enabled = true
-```
 
 ### Development Commands
 
 ```bash
-# Run with debug logging
-cargo run -- --log-level debug
-
-# Run with custom config
-cargo run -- --config dev-config.toml
-
-# Validate configuration
-cargo run -- --validate-config
+# Check code without building
+cargo check
 
 # Run tests
 cargo test
 
-# Run with file watching (requires cargo-watch)
-cargo watch -x run
-```
+# Format code
+cargo fmt
 
-## Production Deployment
+# Lint code
+cargo clippy
 
-### Binary Deployment
+# Generate documentation
+cargo doc --open
 
-1. **Build Optimized Binary**
-   ```bash
-   cargo build --release
-   strip target/release/ai-proxy  # Optional: reduce binary size
-   ```
-
-2. **Create System User**
-   ```bash
-   sudo useradd --system --shell /bin/false --home /opt/ai-proxy ai-proxy
-   sudo mkdir -p /opt/ai-proxy
-   sudo chown ai-proxy:ai-proxy /opt/ai-proxy
-   ```
-
-3. **Install Binary**
-   ```bash
-   sudo cp target/release/ai-proxy /usr/local/bin/
-   sudo chmod +x /usr/local/bin/ai-proxy
-   ```
-
-4. **Create Configuration**
-   ```bash
-   sudo mkdir -p /etc/ai-proxy
-   sudo cp config.example.toml /etc/ai-proxy/config.toml
-   sudo chown ai-proxy:ai-proxy /etc/ai-proxy/config.toml
-   sudo chmod 600 /etc/ai-proxy/config.toml
-   ```
-
-### Systemd Service
-
-Create `/etc/systemd/system/ai-proxy.service`:
-
-```ini
-[Unit]
-Description=AI Proxy Service
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-User=ai-proxy
-Group=ai-proxy
-ExecStart=/usr/local/bin/ai-proxy --config /etc/ai-proxy/config.toml
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=ai-proxy
-
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/log/ai-proxy
-
-# Resource limits
-LimitNOFILE=65536
-LimitNPROC=4096
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start the service:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable ai-proxy
-sudo systemctl start ai-proxy
-sudo systemctl status ai-proxy
-```
-
-### Production Configuration
-
-```toml
-# /etc/ai-proxy/config.toml
-[server]
-host = "0.0.0.0"
-port = 3000
-request_timeout_seconds = 30
-max_request_size_bytes = 10485760  # 10MB
-
-[logging]
-level = "info"
-format = "json"
-log_requests = true
-log_responses = false
-
-[security]
-cors_enabled = true
-allowed_origins = ["https://your-domain.com"]
-rate_limit_enabled = true
-
-[performance]
-connection_pool_size = 20
-max_concurrent_requests = 1000
-
-# Use environment variables for sensitive data
-[providers.openai]
-api_key = "${AI_PROXY_OPENAI_KEY}"
-api_base = "https://api.openai.com/v1/"
-timeout_seconds = 60
-max_retries = 3
-enabled = true
-
-[providers.anthropic]
-api_key = "${AI_PROXY_ANTHROPIC_KEY}"
-api_base = "https://api.anthropic.com/v1/"
-timeout_seconds = 60
-max_retries = 3
-enabled = true
+# Run with debug logging
+AI_PROXY_LOGGING_LEVEL=debug cargo run
 ```
 
 ## Docker Deployment
 
-### Dockerfile
+### Building Docker Image
 
-```dockerfile
-# Multi-stage build for smaller image
-FROM rust:1.75-slim as builder
+1. **Create Dockerfile**:
+   ```dockerfile
+   # Multi-stage build for smaller image size
+   FROM rust:1.75-slim as builder
+   
+   # Install build dependencies
+   RUN apt-get update && apt-get install -y \
+       pkg-config \
+       libssl-dev \
+       && rm -rf /var/lib/apt/lists/*
+   
+   # Create app directory
+   WORKDIR /app
+   
+   # Copy dependency files
+   COPY Cargo.toml Cargo.lock ./
+   
+   # Create dummy main.rs to build dependencies
+   RUN mkdir src && echo "fn main() {}" > src/main.rs
+   RUN cargo build --release && rm -rf src
+   
+   # Copy source code
+   COPY src ./src
+   
+   # Build application
+   RUN touch src/main.rs && cargo build --release
+   
+   # Runtime stage
+   FROM debian:bookworm-slim
+   
+   # Install runtime dependencies
+   RUN apt-get update && apt-get install -y \
+       ca-certificates \
+       && rm -rf /var/lib/apt/lists/*
+   
+   # Create app user
+   RUN useradd -r -s /bin/false aiproxy
+   
+   # Create app directory
+   WORKDIR /app
+   
+   # Copy binary from builder stage
+   COPY --from=builder /app/target/release/ai-proxy ./
+   
+   # Copy configuration template
+   COPY config.example.toml ./
+   
+   # Change ownership
+   RUN chown -R aiproxy:aiproxy /app
+   
+   # Switch to app user
+   USER aiproxy
+   
+   # Expose port
+   EXPOSE 3000
+   
+   # Health check
+   HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+     CMD curl -f http://localhost:3000/health || exit 1
+   
+   # Run application
+   CMD ["./ai-proxy"]
+   ```
 
-WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
+2. **Build the image**:
+   ```bash
+   docker build -t ai-proxy:latest .
+   ```
 
-# Build optimized binary
-RUN cargo build --release
-
-# Runtime image
-FROM debian:bookworm-slim
-
-# Install CA certificates for HTTPS
-RUN apt-get update && \
-    apt-get install -y ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash ai-proxy
-
-# Copy binary
-COPY --from=builder /app/target/release/ai-proxy /usr/local/bin/ai-proxy
-RUN chmod +x /usr/local/bin/ai-proxy
-
-# Create config directory
-RUN mkdir -p /app/config && chown ai-proxy:ai-proxy /app/config
-
-USER ai-proxy
-WORKDIR /app
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
-
-EXPOSE 3000
-
-CMD ["ai-proxy", "--config", "/app/config/config.toml"]
-```
-
-### Build and Run
-
-```bash
-# Build image
-docker build -t ai-proxy:latest .
-
-# Run with environment variables
-docker run -d \
-  --name ai-proxy \
-  -p 3000:3000 \
-  -e AI_PROXY_PROVIDERS_OPENAI_API_KEY=your-openai-key \
-  -e AI_PROXY_PROVIDERS_ANTHROPIC_API_KEY=your-anthropic-key \
-  -e AI_PROXY_SERVER_HOST=0.0.0.0 \
-  ai-proxy:latest
-
-# Run with config file
-docker run -d \
-  --name ai-proxy \
-  -p 3000:3000 \
-  -v $(pwd)/config.toml:/app/config/config.toml:ro \
-  ai-proxy:latest
-
-# View logs
-docker logs -f ai-proxy
-
-# Health check
-docker exec ai-proxy curl -f http://localhost:3000/health
-```
+3. **Run the container**:
+   ```bash
+   # Basic run
+   docker run -p 3000:3000 ai-proxy:latest
+   
+   # With custom configuration
+   docker run -p 3000:3000 \
+     -v $(pwd)/config.toml:/app/config.toml:ro \
+     ai-proxy:latest
+   
+   # With environment variables
+   docker run -p 3000:3000 \
+     -e AI_PROXY_PROVIDERS_OPENAI_API_KEY=your-key \
+     -e AI_PROXY_PROVIDERS_ANTHROPIC_API_KEY=your-key \
+     ai-proxy:latest
+   ```
 
 ### Docker Compose
 
+Create `docker-compose.yml`:
+
 ```yaml
-# docker-compose.yml
 version: '3.8'
 
 services:
@@ -296,12 +197,13 @@ services:
       - "3000:3000"
     environment:
       - AI_PROXY_SERVER_HOST=0.0.0.0
-      - AI_PROXY_SERVER_PORT=3000
+      - AI_PROXY_LOGGING_LEVEL=info
       - AI_PROXY_PROVIDERS_OPENAI_API_KEY=${OPENAI_API_KEY}
       - AI_PROXY_PROVIDERS_ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - AI_PROXY_LOGGING_LEVEL=info
+      - AI_PROXY_PROVIDERS_GEMINI_API_KEY=${GEMINI_API_KEY}
     volumes:
-      - ./config.toml:/app/config/config.toml:ro
+      - ./config.toml:/app/config.toml:ro
+      - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -310,7 +212,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # Optional: Reverse proxy
+  # Optional: Reverse proxy with SSL
   nginx:
     image: nginx:alpine
     ports:
@@ -324,184 +226,208 @@ services:
     restart: unless-stopped
 ```
 
+Run with Docker Compose:
+
+```bash
+# Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f ai-proxy
+
+# Stop services
+docker-compose down
+```
+
 ## Kubernetes Deployment
 
-### Namespace
+### Basic Deployment
 
-```yaml
-# namespace.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ai-proxy
-```
+1. **Create namespace**:
+   ```yaml
+   # namespace.yaml
+   apiVersion: v1
+   kind: Namespace
+   metadata:
+     name: ai-proxy
+   ```
 
-### ConfigMap
+2. **Create ConfigMap**:
+   ```yaml
+   # configmap.yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: ai-proxy-config
+     namespace: ai-proxy
+   data:
+     config.toml: |
+       [server]
+       host = "0.0.0.0"
+       port = 3000
+       request_timeout_seconds = 30
+       max_request_size_bytes = 1048576
+       
+       [providers.openai]
+       api_key = "${OPENAI_API_KEY}"
+       api_base = "https://api.openai.com/v1/"
+       models = ["gpt-3.5-turbo", "gpt-4"]
+       timeout_seconds = 60
+       max_retries = 3
+       enabled = true
+       
+       [providers.anthropic]
+       api_key = "${ANTHROPIC_API_KEY}"
+       api_base = "https://api.anthropic.com/v1/"
+       models = ["claude-3-haiku-20240307", "claude-3-5-sonnet-20241022"]
+       timeout_seconds = 60
+       max_retries = 3
+       enabled = true
+       
+       [logging]
+       level = "info"
+       format = "json"
+   ```
 
-```yaml
-# configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: ai-proxy-config
-  namespace: ai-proxy
-data:
-  config.toml: |
-    [server]
-    host = "0.0.0.0"
-    port = 3000
-    
-    [logging]
-    level = "info"
-    format = "json"
-    
-    [security]
-    cors_enabled = true
-    
-    [performance]
-    connection_pool_size = 20
-    max_concurrent_requests = 1000
-```
+3. **Create Secret**:
+   ```yaml
+   # secret.yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: ai-proxy-secrets
+     namespace: ai-proxy
+   type: Opaque
+   data:
+     openai-api-key: <base64-encoded-key>
+     anthropic-api-key: <base64-encoded-key>
+     gemini-api-key: <base64-encoded-key>
+   ```
 
-### Secret
+4. **Create Deployment**:
+   ```yaml
+   # deployment.yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: ai-proxy
+     namespace: ai-proxy
+     labels:
+       app: ai-proxy
+   spec:
+     replicas: 3
+     selector:
+       matchLabels:
+         app: ai-proxy
+     template:
+       metadata:
+         labels:
+           app: ai-proxy
+       spec:
+         containers:
+         - name: ai-proxy
+           image: ai-proxy:latest
+           ports:
+           - containerPort: 3000
+           env:
+           - name: AI_PROXY_PROVIDERS_OPENAI_API_KEY
+             valueFrom:
+               secretKeyRef:
+                 name: ai-proxy-secrets
+                 key: openai-api-key
+           - name: AI_PROXY_PROVIDERS_ANTHROPIC_API_KEY
+             valueFrom:
+               secretKeyRef:
+                 name: ai-proxy-secrets
+                 key: anthropic-api-key
+           - name: AI_PROXY_PROVIDERS_GEMINI_API_KEY
+             valueFrom:
+               secretKeyRef:
+                 name: ai-proxy-secrets
+                 key: gemini-api-key
+           volumeMounts:
+           - name: config
+             mountPath: /app/config.toml
+             subPath: config.toml
+           resources:
+             requests:
+               memory: "256Mi"
+               cpu: "250m"
+             limits:
+               memory: "512Mi"
+               cpu: "500m"
+           livenessProbe:
+             httpGet:
+               path: /health
+               port: 3000
+             initialDelaySeconds: 30
+             periodSeconds: 10
+           readinessProbe:
+             httpGet:
+               path: /health
+               port: 3000
+             initialDelaySeconds: 5
+             periodSeconds: 5
+         volumes:
+         - name: config
+           configMap:
+             name: ai-proxy-config
+   ```
 
-```yaml
-# secret.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ai-proxy-secrets
-  namespace: ai-proxy
-type: Opaque
-data:
-  openai-key: <base64-encoded-openai-key>
-  anthropic-key: <base64-encoded-anthropic-key>
-```
+5. **Create Service**:
+   ```yaml
+   # service.yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: ai-proxy-service
+     namespace: ai-proxy
+   spec:
+     selector:
+       app: ai-proxy
+     ports:
+     - protocol: TCP
+       port: 80
+       targetPort: 3000
+     type: ClusterIP
+   ```
 
-### Deployment
-
-```yaml
-# deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ai-proxy
-  namespace: ai-proxy
-  labels:
-    app: ai-proxy
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: ai-proxy
-  template:
-    metadata:
-      labels:
-        app: ai-proxy
-    spec:
-      containers:
-      - name: ai-proxy
-        image: ai-proxy:latest
-        ports:
-        - containerPort: 3000
-        env:
-        - name: AI_PROXY_SERVER_HOST
-          value: "0.0.0.0"
-        - name: AI_PROXY_PROVIDERS_OPENAI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ai-proxy-secrets
-              key: openai-key
-        - name: AI_PROXY_PROVIDERS_ANTHROPIC_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ai-proxy-secrets
-              key: anthropic-key
-        volumeMounts:
-        - name: config
-          mountPath: /app/config
-          readOnly: true
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "1Gi"
-            cpu: "500m"
-      volumes:
-      - name: config
-        configMap:
-          name: ai-proxy-config
-```
-
-### Service
-
-```yaml
-# service.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: ai-proxy-service
-  namespace: ai-proxy
-spec:
-  selector:
-    app: ai-proxy
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 3000
-  type: ClusterIP
-```
-
-### Ingress
-
-```yaml
-# ingress.yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: ai-proxy-ingress
-  namespace: ai-proxy
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-spec:
-  tls:
-  - hosts:
-    - api.yourdomain.com
-    secretName: ai-proxy-tls
-  rules:
-  - host: api.yourdomain.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: ai-proxy-service
-            port:
-              number: 80
-```
+6. **Create Ingress** (optional):
+   ```yaml
+   # ingress.yaml
+   apiVersion: networking.k8s.io/v1
+   kind: Ingress
+   metadata:
+     name: ai-proxy-ingress
+     namespace: ai-proxy
+     annotations:
+       kubernetes.io/ingress.class: nginx
+       cert-manager.io/cluster-issuer: letsencrypt-prod
+   spec:
+     tls:
+     - hosts:
+       - ai-proxy.yourdomain.com
+       secretName: ai-proxy-tls
+     rules:
+     - host: ai-proxy.yourdomain.com
+       http:
+         paths:
+         - path: /
+           pathType: Prefix
+           backend:
+             service:
+               name: ai-proxy-service
+               port:
+                 number: 80
+   ```
 
 ### Deploy to Kubernetes
 
 ```bash
 # Apply all manifests
 kubectl apply -f namespace.yaml
-kubectl apply -f configmap.yaml
 kubectl apply -f secret.yaml
+kubectl apply -f configmap.yaml
 kubectl apply -f deployment.yaml
 kubectl apply -f service.yaml
 kubectl apply -f ingress.yaml
@@ -514,161 +440,14 @@ kubectl get ingress -n ai-proxy
 # View logs
 kubectl logs -f deployment/ai-proxy -n ai-proxy
 
-# Scale deployment
-kubectl scale deployment ai-proxy --replicas=5 -n ai-proxy
+# Port forward for testing
+kubectl port-forward service/ai-proxy-service 3000:80 -n ai-proxy
 ```
 
-## Configuration Management
-
-### Environment Variables
-
-```bash
-# Production environment variables
-export AI_PROXY_SERVER_HOST=0.0.0.0
-export AI_PROXY_SERVER_PORT=3000
-export AI_PROXY_PROVIDERS_OPENAI_API_KEY=your-openai-key
-export AI_PROXY_PROVIDERS_ANTHROPIC_API_KEY=your-anthropic-key
-export AI_PROXY_LOGGING_LEVEL=info
-export AI_PROXY_SECURITY_CORS_ENABLED=true
-export AI_PROXY_PERFORMANCE_MAX_CONCURRENT_REQUESTS=1000
-```
-
-### Configuration Validation
-
-```bash
-# Validate configuration before deployment
-ai-proxy --validate-config --config /etc/ai-proxy/config.toml
-
-# Test configuration with dry run
-ai-proxy --config /etc/ai-proxy/config.toml --validate-config
-```
-
-## Monitoring and Logging
-
-### Log Management
-
-```bash
-# Systemd logs
-journalctl -u ai-proxy -f
-
-# Docker logs
-docker logs -f ai-proxy
-
-# Kubernetes logs
-kubectl logs -f deployment/ai-proxy -n ai-proxy
-```
-
-### Health Monitoring
-
-```bash
-# Basic health check
-curl http://localhost:3000/health
-
-# Provider health check
-curl http://localhost:3000/health/providers
-
-# Automated monitoring script
-#!/bin/bash
-while true; do
-  if ! curl -f http://localhost:3000/health > /dev/null 2>&1; then
-    echo "$(date): Health check failed" >> /var/log/ai-proxy-monitor.log
-    # Send alert
-  fi
-  sleep 30
-done
-```
-
-### Metrics Collection
-
-If metrics endpoint is implemented:
-
-```bash
-# Prometheus metrics
-curl http://localhost:3000/metrics
-
-# Custom monitoring
-curl http://localhost:3000/health/providers | jq '.providers[] | select(.status != "healthy")'
-```
-
-## Security Considerations
-
-### Network Security
-
-```bash
-# Firewall rules (iptables example)
-sudo iptables -A INPUT -p tcp --dport 3000 -s trusted-ip-range -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 3000 -j DROP
-
-# Or use ufw
-sudo ufw allow from trusted-ip-range to any port 3000
-```
-
-### SSL/TLS Termination
-
-Use a reverse proxy like Nginx:
-
-```nginx
-# /etc/nginx/sites-available/ai-proxy
-server {
-    listen 443 ssl http2;
-    server_name api.yourdomain.com;
-
-    ssl_certificate /path/to/certificate.crt;
-    ssl_certificate_key /path/to/private.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-### API Key Management
-
-```bash
-# Use environment variables for sensitive data
-export AI_PROXY_PROVIDERS_OPENAI_API_KEY=$(cat /secure/path/openai.key)
-
-# Or use secret management systems
-export AI_PROXY_PROVIDERS_OPENAI_API_KEY=$(vault kv get -field=api_key secret/ai-proxy/openai)
-```
-
-## Performance Tuning
-
-### System Limits
-
-```bash
-# Increase file descriptor limits
-echo "ai-proxy soft nofile 65536" >> /etc/security/limits.conf
-echo "ai-proxy hard nofile 65536" >> /etc/security/limits.conf
-
-# Kernel parameters
-echo "net.core.somaxconn = 65536" >> /etc/sysctl.conf
-echo "net.ipv4.tcp_max_syn_backlog = 65536" >> /etc/sysctl.conf
-sysctl -p
-```
-
-### Application Tuning
-
-```toml
-# High-performance configuration
-[performance]
-connection_pool_size = 50
-keep_alive_timeout_seconds = 300
-max_concurrent_requests = 2000
-
-[server]
-request_timeout_seconds = 60
-max_request_size_bytes = 52428800  # 50MB
-```
-
-### Load Balancing
+### Horizontal Pod Autoscaler
 
 ```yaml
-# Kubernetes HPA
+# hpa.yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -679,7 +458,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: ai-proxy
-  minReplicas: 3
+  minReplicas: 2
   maxReplicas: 10
   metrics:
   - type: Resource
@@ -688,63 +467,323 @@ spec:
       target:
         type: Utilization
         averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+## Production Considerations
+
+### Performance Tuning
+
+1. **Resource Allocation**:
+   ```toml
+   [performance]
+   connection_pool_size = 20
+   keep_alive_timeout_seconds = 60
+   max_concurrent_requests = 200
+   ```
+
+2. **JVM-like Tuning** (Rust equivalent):
+   ```bash
+   # Set environment variables
+   export RUST_LOG=info
+   export RUST_BACKTRACE=1
+   
+   # For production, consider:
+   export MALLOC_ARENA_MAX=2  # Limit memory arenas
+   ```
+
+### Load Balancing
+
+Use a load balancer (nginx, HAProxy, or cloud load balancer):
+
+```nginx
+# nginx.conf
+upstream ai_proxy {
+    least_conn;
+    server ai-proxy-1:3000 max_fails=3 fail_timeout=30s;
+    server ai-proxy-2:3000 max_fails=3 fail_timeout=30s;
+    server ai-proxy-3:3000 max_fails=3 fail_timeout=30s;
+}
+
+server {
+    listen 80;
+    server_name ai-proxy.yourdomain.com;
+    
+    location / {
+        proxy_pass http://ai_proxy;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Timeouts
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        
+        # Buffering for streaming
+        proxy_buffering off;
+        proxy_cache off;
+    }
+    
+    location /health {
+        proxy_pass http://ai_proxy;
+        access_log off;
+    }
+}
+```
+
+### Database and Persistence
+
+For production, consider adding:
+
+1. **Redis for caching**:
+   ```yaml
+   # redis.yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: redis
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: redis
+     template:
+       metadata:
+         labels:
+           app: redis
+       spec:
+         containers:
+         - name: redis
+           image: redis:7-alpine
+           ports:
+           - containerPort: 6379
+   ```
+
+2. **PostgreSQL for analytics**:
+   ```yaml
+   # postgres.yaml
+   apiVersion: apps/v1
+   kind: StatefulSet
+   metadata:
+     name: postgres
+   spec:
+     serviceName: postgres
+     replicas: 1
+     selector:
+       matchLabels:
+         app: postgres
+     template:
+       metadata:
+         labels:
+           app: postgres
+       spec:
+         containers:
+         - name: postgres
+           image: postgres:15
+           env:
+           - name: POSTGRES_DB
+             value: aiproxy
+           - name: POSTGRES_USER
+             value: aiproxy
+           - name: POSTGRES_PASSWORD
+             valueFrom:
+               secretKeyRef:
+                 name: postgres-secret
+                 key: password
+           volumeMounts:
+           - name: postgres-storage
+             mountPath: /var/lib/postgresql/data
+     volumeClaimTemplates:
+     - metadata:
+         name: postgres-storage
+       spec:
+         accessModes: ["ReadWriteOnce"]
+         resources:
+           requests:
+             storage: 10Gi
+   ```
+
+## Monitoring and Logging
+
+### Prometheus Metrics
+
+Add metrics endpoint configuration:
+
+```toml
+[monitoring]
+metrics_enabled = true
+metrics_port = 9090
+prometheus_format = true
+```
+
+### Grafana Dashboard
+
+Create a Grafana dashboard to monitor:
+
+- Request rate and latency
+- Error rates by provider
+- Active connections
+- Memory and CPU usage
+- Provider response times
+
+### Log Aggregation
+
+Use ELK stack or similar:
+
+```yaml
+# filebeat.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+data:
+  filebeat.yml: |
+    filebeat.inputs:
+    - type: container
+      paths:
+        - /var/log/containers/*ai-proxy*.log
+      processors:
+      - add_kubernetes_metadata:
+          host: ${NODE_NAME}
+          matchers:
+          - logs_path:
+              logs_path: "/var/log/containers/"
+    
+    output.elasticsearch:
+      hosts: ["elasticsearch:9200"]
+    
+    setup.kibana:
+      host: "kibana:5601"
+```
+
+## Security
+
+### API Key Management
+
+1. **Use Kubernetes Secrets**:
+   ```bash
+   kubectl create secret generic ai-proxy-secrets \
+     --from-literal=openai-api-key=your-key \
+     --from-literal=anthropic-api-key=your-key \
+     -n ai-proxy
+   ```
+
+2. **Use external secret management**:
+   - AWS Secrets Manager
+   - Azure Key Vault
+   - HashiCorp Vault
+   - Google Secret Manager
+
+### Network Security
+
+1. **Network Policies**:
+   ```yaml
+   apiVersion: networking.k8s.io/v1
+   kind: NetworkPolicy
+   metadata:
+     name: ai-proxy-netpol
+     namespace: ai-proxy
+   spec:
+     podSelector:
+       matchLabels:
+         app: ai-proxy
+     policyTypes:
+     - Ingress
+     - Egress
+     ingress:
+     - from:
+       - namespaceSelector:
+           matchLabels:
+             name: ingress-nginx
+       ports:
+       - protocol: TCP
+         port: 3000
+     egress:
+     - to: []
+       ports:
+       - protocol: TCP
+         port: 443  # HTTPS to AI providers
+   ```
+
+2. **TLS Configuration**:
+   ```toml
+   [security]
+   tls_enabled = true
+   cert_file = "/etc/ssl/certs/server.crt"
+   key_file = "/etc/ssl/private/server.key"
+   ```
+
+### Authentication
+
+Enable API key authentication:
+
+```toml
+[security]
+api_keys = [
+    "your-client-api-key-1",
+    "your-client-api-key-2"
+]
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Port already in use**
+1. **Pod CrashLoopBackOff**:
    ```bash
-   sudo lsof -i :3000
-   sudo netstat -tulpn | grep :3000
+   kubectl describe pod <pod-name> -n ai-proxy
+   kubectl logs <pod-name> -n ai-proxy --previous
    ```
 
-2. **Permission denied**
+2. **Service not accessible**:
    ```bash
-   sudo chown -R ai-proxy:ai-proxy /opt/ai-proxy
-   sudo chmod +x /usr/local/bin/ai-proxy
+   kubectl get endpoints -n ai-proxy
+   kubectl port-forward service/ai-proxy-service 3000:80 -n ai-proxy
    ```
 
-3. **Configuration errors**
+3. **High memory usage**:
    ```bash
-   ai-proxy --validate-config --config /path/to/config.toml
+   kubectl top pods -n ai-proxy
+   kubectl describe pod <pod-name> -n ai-proxy
    ```
 
-4. **Memory issues**
-   ```bash
-   # Monitor memory usage
-   top -p $(pgrep ai-proxy)
-   
-   # Check system resources
-   free -h
-   df -h
-   ```
-
-### Debug Mode
+### Debug Commands
 
 ```bash
-# Run with debug logging
-AI_PROXY_LOGGING_LEVEL=debug ai-proxy
+# Check all resources
+kubectl get all -n ai-proxy
 
-# Trace network issues
-strace -e network ai-proxy
+# Describe deployment
+kubectl describe deployment ai-proxy -n ai-proxy
 
-# Monitor file descriptors
-lsof -p $(pgrep ai-proxy)
+# Check events
+kubectl get events -n ai-proxy --sort-by='.lastTimestamp'
+
+# Execute into pod
+kubectl exec -it <pod-name> -n ai-proxy -- /bin/sh
+
+# Check configuration
+kubectl get configmap ai-proxy-config -n ai-proxy -o yaml
 ```
 
-### Log Analysis
+### Performance Monitoring
 
 ```bash
-# Parse JSON logs
-journalctl -u ai-proxy -o json | jq '.MESSAGE'
+# Monitor resource usage
+kubectl top pods -n ai-proxy --containers
 
-# Filter error logs
-journalctl -u ai-proxy | grep ERROR
+# Check HPA status
+kubectl get hpa -n ai-proxy
 
-# Monitor real-time logs
-tail -f /var/log/ai-proxy.log | grep -E "(ERROR|WARN)"
+# View detailed metrics
+kubectl describe hpa ai-proxy-hpa -n ai-proxy
 ```
 
 ## Backup and Recovery
@@ -752,26 +791,54 @@ tail -f /var/log/ai-proxy.log | grep -E "(ERROR|WARN)"
 ### Configuration Backup
 
 ```bash
-# Backup configuration
-tar -czf ai-proxy-config-$(date +%Y%m%d).tar.gz /etc/ai-proxy/
+# Backup all configurations
+kubectl get all,configmap,secret -n ai-proxy -o yaml > ai-proxy-backup.yaml
 
-# Automated backup script
-#!/bin/bash
-BACKUP_DIR="/backup/ai-proxy"
-DATE=$(date +%Y%m%d_%H%M%S)
-mkdir -p $BACKUP_DIR
-cp /etc/ai-proxy/config.toml $BACKUP_DIR/config-$DATE.toml
+# Restore from backup
+kubectl apply -f ai-proxy-backup.yaml
 ```
 
 ### Disaster Recovery
 
-```bash
-# Quick recovery steps
-1. Restore configuration from backup
-2. Verify API keys are still valid
-3. Test connectivity to AI providers
-4. Restart service
-5. Verify health endpoints
+1. **Multi-region deployment**
+2. **Database replication**
+3. **Configuration versioning**
+4. **Automated failover**
+
+## Scaling Strategies
+
+### Vertical Scaling
+
+```yaml
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
 ```
 
-This deployment guide provides comprehensive instructions for deploying AI Proxy in various environments. Choose the deployment method that best fits your infrastructure and requirements.
+### Horizontal Scaling
+
+```yaml
+spec:
+  replicas: 5  # Increase replica count
+```
+
+### Auto-scaling
+
+Use HPA with custom metrics:
+
+```yaml
+metrics:
+- type: Pods
+  pods:
+    metric:
+      name: requests_per_second
+    target:
+      type: AverageValue
+      averageValue: "100"
+```
+
+This deployment guide provides comprehensive coverage of deploying AI Proxy in various environments, from development to production-ready Kubernetes clusters.

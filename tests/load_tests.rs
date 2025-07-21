@@ -6,23 +6,17 @@
 /// - Resource exhaustion testing
 /// - Scalability verification
 
-use ai_proxy::{
-    config::{Config, LoggingConfig, PerformanceConfig, ProviderDetail, SecurityConfig, ServerConfig},
-    providers::{ProviderRegistry, anthropic::{AnthropicRequest, Message}},
-    server::{AppState, create_app},
-};
+use ai_proxy::server::{AppState, create_app};
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::Request,
     response::Response,
 };
-use futures::{stream, StreamExt, future::join_all};
-use reqwest::Client;
-use serde_json::{json, Value};
+use futures::StreamExt;
+use serde_json::json;
 use std::{
-    collections::HashMap,
-    sync::{Arc, atomic::{AtomicUsize, AtomicU64, Ordering}},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    time::{Duration, Instant},
 };
 use tokio::{
     sync::{RwLock, Barrier},

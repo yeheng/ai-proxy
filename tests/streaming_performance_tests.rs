@@ -33,9 +33,9 @@ use tokio::{
     io::{AsyncRead, AsyncBufReadExt, BufReader},
 };
 use tower::ServiceExt;
+use crate::integration_framework::IntegrationTestFramework;
 
 mod integration_framework;
-use integration_framework::IntegrationTestFramework;
 
 /// Memory usage snapshot for tracking memory over time
 #[derive(Debug, Clone)]
