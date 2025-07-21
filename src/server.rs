@@ -169,7 +169,7 @@ pub fn create_app(state: AppState) -> Router {
 ///
 /// ## 功能说明
 /// 启动AI代理HTTP服务器，监听指定地址和端口，处理客户端请求
-/// 包含完整的中间件栈和结构化日志系统
+/// 包含完整的中间件栈和结构化日志系统，支持优雅关闭
 ///
 /// ## 内部实现逻辑
 /// 1. 从配置创建应用程序状态
@@ -237,14 +237,48 @@ pub async fn start_server(config: Config) -> AppResult<()> {
     tracing::info!("  - Performance monitoring and metrics");
     tracing::info!("  - HTTP tracing and CORS support");
 
-    // Start server with graceful shutdown support
+    // 启动服务器，支持优雅关闭
     tracing::info!("Server ready to accept connections");
+    
+    // 使用 axum::serve 的优雅关闭功能
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(|e| AppError::InternalServerError(format!("Server error: {}", e)))?;
 
     tracing::info!("Server shutdown completed");
     Ok(())
+}
+
+/// 优雅关闭信号处理
+/// 
+/// 监听系统信号，支持优雅关闭服务器
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            tracing::info!("Received SIGINT (Ctrl+C), initiating graceful shutdown");
+        },
+        _ = terminate => {
+            tracing::info!("Received SIGTERM, initiating graceful shutdown");
+        },
+    }
 }
 
 // Request Handlers

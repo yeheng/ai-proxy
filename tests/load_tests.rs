@@ -25,14 +25,14 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::{RwLock, Semaphore, Barrier},
+    sync::{RwLock, Barrier},
     task::JoinSet,
     time::{timeout, interval},
 };
 use tower::ServiceExt;
+use integration_framework::IntegrationTestFramework;
 
 mod integration_framework;
-use integration_framework::IntegrationTestFramework;
 
 /// Load test configuration for different scenarios
 #[derive(Debug, Clone)]

@@ -9,3 +9,6 @@ mod metrics_tests;
 mod performance_tests;
 mod load_tests;
 mod streaming_performance_tests;
+mod end_to_end_streaming_tests;
+mod integration_tests;
+pub mod integration_framework;

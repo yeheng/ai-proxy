@@ -26,8 +26,7 @@ use tokio::{
 };
 use tower::ServiceExt;
 
-mod integration_framework;
-use integration_framework::IntegrationTestFramework;
+use crate::integration_framework::IntegrationTestFramework;
 
 /// Performance test configuration
 #[derive(Debug, Clone)]
